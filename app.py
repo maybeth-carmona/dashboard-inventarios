@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np
 from datetime import datetime
 
 # ======================================================
@@ -50,7 +51,7 @@ pedidos = pedidos.rename(columns={
     'Centro': 'centro',
     'Proveedor': 'num_proveedor',
     'Proveedor TEXT': 'nombre_proveedor',
-    'Fecha de Entrega': 'fecha_mr',
+    'Fecha de Entrega': 'fecha_mr',        # MR
     'Fecha Creación Pedido': 'fecha_pedido',
     'Cantidad Entregada': 'cantidad_entregada',
     'Cantidad (Ejercido)': 'cantidad_pedida'
@@ -63,8 +64,7 @@ for c in ['fecha_mr', 'fecha_pedido']:
     pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
 
 # ======================================================
-# CONVENIOS ❌ (ELIMINADOS)
-# 256XXXX / 266XXXX
+# ELIMINAR CONVENIOS (256XXXX / 266XXXX)
 # ======================================================
 pedidos['pedido'] = pedidos['pedido'].astype(str)
 pedidos = pedidos[
@@ -79,21 +79,20 @@ pedidos['cantidad_pendiente'] = pedidos['cantidad_pedida'] - pedidos['cantidad_e
 base = pedidos[pedidos['cantidad_pendiente'] > 0].copy()
 
 # ======================================================
-# DÍAS DE ATRASO (LOGICA DE NEGOCIO)
+# DÍAS DE ATRASO (VECTORIAL, ROBUSTO)
 # ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
-def calcular_dias_atraso(row):
-    if pd.notna(row['fecha_mr']):
-        return (row['fecha_mr'] - row['fecha_pedido']).days
-    else:
-        return (fecha_hoy - row['fecha_pedido']).days
+base['dias_atraso'] = np.where(
+    base['fecha_mr'].notna(),
+    (base['fecha_mr'] - base['fecha_pedido']).dt.days,
+    (fecha_hoy - base['fecha_pedido']).dt.days
+)
 
-base['dias_atraso'] = base.apply(calcular_dias_atraso, axis=1)
-base['dias_atraso'] = base['dias_atraso'].clip(lower=0)
+base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype(int)
 
 # ======================================================
-# SEMÁFORO + DÍAS EN UNA SOLA CELDA ✅
+# SEMÁFORO EN LA MISMA CELDA
 # ======================================================
 def dias_con_semaforo(d):
     if d > 60:
@@ -147,7 +146,7 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        title="Top 10 Proveedores – Días EXACTOS de atraso promedio",
+        title="Top 10 Proveedores – DÍAS EXACTOS de atraso promedio",
         labels={
             'nombre_proveedor': 'Proveedor',
             'dias_promedio': 'Días de atraso',
@@ -174,15 +173,15 @@ columnas_tabla = [
 st.subheader("📋 Centros 1000 / 8000")
 st.dataframe(
     df[df['centro'].isin([1000, 8000])]
-      [columnas_tabla]
-      .sort_values('dias_atraso', ascending=False),
+        [columnas_tabla]
+        .sort_values('dias_atraso', ascending=False),
     use_container_width=True
 )
 
 st.subheader("📋 Centros 2000 / 7000")
 st.dataframe(
     df[df['centro'].isin([2000, 7000])]
-      [columnas_tabla]
-      .sort_values('dias_atraso', ascending=False),
+        [columnas_tabla]
+        .sort_values('dias_atraso', ascending=False),
     use_container_width=True
 )
