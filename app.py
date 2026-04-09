@@ -3,20 +3,20 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 
-# -------------------------------------------------
+# ======================================================
 # CONFIGURACIÓN GENERAL
-# -------------------------------------------------
+# ======================================================
 st.set_page_config(
     page_title="Dashboard Riesgo de Inventarios",
     layout="wide"
 )
 
 st.title("📊 Dashboard de Riesgo de Inventarios")
-st.caption("Cálculo automático de días exactos de retraso (actualización diaria)")
+st.caption("Días EXACTOS de demora por proveedor – cálculo automático diario")
 
-# -------------------------------------------------
+# ======================================================
 # CARGA DE ARCHIVOS
-# -------------------------------------------------
+# ======================================================
 st.sidebar.header("📂 Carga de archivos SAP")
 
 file_solped = st.sidebar.file_uploader(
@@ -30,25 +30,26 @@ file_pedidos = st.sidebar.file_uploader(
 )
 
 if not file_solped or not file_pedidos:
-    st.warning("⬅️ Sube ambos archivos para iniciar el dashboard")
+    st.warning("⬅️ Sube ambos archivos para iniciar el análisis")
     st.stop()
 
-# -------------------------------------------------
+# ======================================================
 # LECTURA DE EXCELES
-# -------------------------------------------------
+# ======================================================
 solped = pd.read_excel(file_solped)
 pedidos = pd.read_excel(file_pedidos)
 
-# -------------------------------------------------
+# ======================================================
 # NORMALIZACIÓN DE COLUMNAS
-# -------------------------------------------------
+# ======================================================
 pedidos = pedidos.rename(columns={
     'Pedido de Compras': 'pedido',
     'Material': 'material_sap',
     'Texto Breve Posicion': 'descripcion_material',
     'Grupo artículos': 'grupo_articulos',
     'Centro': 'centro',
-    'Proveedor TEXT': 'proveedor',
+    'Proveedor': 'num_proveedor',           # número proveedor
+    'Proveedor TEXT': 'nombre_proveedor',   # nombre proveedor
     'Fecha de Entrega': 'fecha_entrega',
     'Fecha Creación Pedido': 'fecha_pedido',
     'Cantidad Entregada': 'cantidad_entregada',
@@ -63,18 +64,18 @@ solped = solped.rename(columns={
     'Fecha Liberación Solped': 'fecha_lib_solped'
 })
 
-# -------------------------------------------------
+# ======================================================
 # MERGE SOLPED – PEDIDO
-# -------------------------------------------------
+# ======================================================
 base = pedidos.merge(
     solped[['solped', 'partida', 'fecha_lib_solped']],
     on=['solped', 'partida'],
     how='left'
 )
 
-# -------------------------------------------------
-# CÁLCULOS
-# -------------------------------------------------
+# ======================================================
+# CÁLCULOS DE DÍAS (SIN REDONDEAR)
+# ======================================================
 for c in ['fecha_entrega', 'fecha_pedido', 'fecha_lib_solped']:
     base[c] = pd.to_datetime(base[c], errors='coerce')
 
@@ -84,11 +85,11 @@ base = base[base['cantidad_pendiente'] > 0]
 
 fecha_hoy = pd.to_datetime(datetime.today().date())
 base['dias_atraso'] = (fecha_hoy - base['fecha_entrega']).dt.days
-base['dias_atraso'] = base['dias_atraso'].clip(lower=0)
+base['dias_atraso'] = base['dias_atraso'].astype(int)  # EXACTOS
 
-# -------------------------------------------------
-# RANGOS DE ATRASO (SOLO VISUAL)
-# -------------------------------------------------
+# ======================================================
+# RANGO DE ATRASO (SOLO VISUAL)
+# ======================================================
 def rango_atraso(d):
     if d >= 61:
         return "+60 días"
@@ -98,9 +99,9 @@ def rango_atraso(d):
 
 base['rango_atraso'] = base['dias_atraso'].apply(rango_atraso)
 
-# -------------------------------------------------
+# ======================================================
 # FILTROS
-# -------------------------------------------------
+# ======================================================
 st.sidebar.header("🎛️ Filtros")
 
 rango_sel = st.sidebar.multiselect(
@@ -122,57 +123,12 @@ if rango_sel:
 if grupo_sel:
     df = df[df['grupo_articulos'].isin(grupo_sel)]
 
-# -------------------------------------------------
+# ======================================================
 # KPIs
-# -------------------------------------------------
+# ======================================================
 col1, col2 = st.columns(2)
 
 col1.metric("Total pedidos con atraso", len(df))
 col2.metric("Pedidos +60 días", len(df[df['rango_atraso'] == "+60 días"]))
 
-# -------------------------------------------------
-# TOP 10 PROVEEDORES
-# -------------------------------------------------
-st.subheader("📈 Top 10 proveedores con mayor atraso")
-
-top10 = (
-    df.groupby("proveedor")
-    .agg(
-        dias_promedio=("dias_atraso", "mean"),
-        pedidos=("pedido", "nunique")
-    )
-    .reset_index()
-    .sort_values(["dias_promedio", "pedidos"], ascending=False)
-    .head(10)
-)
-
-fig = px.bar(
-    top10,
-    x="proveedor",
-    y="dias_promedio",
-    text="pedidos",
-    title="Top 10 Proveedores – Días de atraso promedio",
-    labels={
-        "dias_promedio": "Días de atraso promedio",
-        "pedidos": "Cantidad de pedidos"
-    }
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# -------------------------------------------------
-# TABLAS POR CENTRO
-# -------------------------------------------------
-st.subheader("📋 Centros 1000 / 8000")
-st.dataframe(
-    df[df["centro"].isin([1000, 8000])]
-    .sort_values("dias_atraso", ascending=False),
-    use_container_width=True
-)
-
-st.subheader("📋 Centros 2000 / 7000")
-st.dataframe(
-    df[df["centro"].isin([2000, 7000])]
-    .sort_values("dias_atraso", ascending=False),
-    use_container_width=True
-)
+# ======================================================
