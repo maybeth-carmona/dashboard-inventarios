@@ -55,7 +55,7 @@ for c in ['fecha_mr', 'fecha_pedido']:
     pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
 
 # ======================================================
-# ELIMINAR REGISTROS SIN FECHA DE PEDIDO (NO MEDIBLES)
+# ELIMINAR REGISTROS SIN FECHA DE PEDIDO
 # ======================================================
 pedidos = pedidos[pedidos['fecha_pedido'].notna()].copy()
 
@@ -90,11 +90,10 @@ base['dias_atraso'] = np.where(
     (fecha_hoy - base['fecha_pedido']).dt.days
 )
 
-# ✅ CLAVE: USAR INT64 NULLABLE (NO TRUENA)
 base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype("Int64")
 
 # ======================================================
-# SEMÁFORO + DÍAS EN LA MISMA CELDA
+# SEMÁFORO + TEXTO
 # ======================================================
 def estatus_atraso(row):
     if row['entregado']:
@@ -110,7 +109,7 @@ def estatus_atraso(row):
 base['estatus_atraso'] = base.apply(estatus_atraso, axis=1)
 
 # ======================================================
-# PRIORIDAD PARA ORDEN
+# PRIORIDAD PARA ORDENAR
 # ======================================================
 def prioridad(row):
     if row['entregado']:
@@ -124,23 +123,30 @@ def prioridad(row):
 base['orden_prioridad'] = base.apply(prioridad, axis=1)
 
 # ======================================================
+# PREPARAR COLUMNAS PARA FILTROS (TIPOS SEGUROS)
+# ======================================================
+base['grupo_articulos'] = base['grupo_articulos'].astype(str)
+base['centro'] = base['centro'].astype(str)
+base['nombre_proveedor'] = base['nombre_proveedor'].astype(str)
+
+# ======================================================
 # FILTROS
 # ======================================================
 st.sidebar.header("🎛️ Filtros")
 
 grupo_sel = st.sidebar.multiselect(
     "Grupo de artículos",
-    options=sorted(base['grupo_articulos'].dropna().unique())
+    options=sorted(base['grupo_articulos'].unique())
 )
 
 centro_sel = st.sidebar.multiselect(
     "Centro",
-    options=sorted(base['centro'].dropna().unique())
+    options=sorted(base['centro'].unique())
 )
 
 proveedor_sel = st.sidebar.multiselect(
     "Proveedor",
-    options=sorted(base['nombre_proveedor'].dropna().unique())
+    options=sorted(base['nombre_proveedor'].unique())
 )
 
 df = base.copy()
@@ -155,7 +161,7 @@ if proveedor_sel:
     df = df[df['nombre_proveedor'].isin(proveedor_sel)]
 
 # ======================================================
-# KPIs (SOLO NO ENTREGADOS)
+# KPIs
 # ======================================================
 df_no_entregados = df[~df['entregado']]
 
@@ -184,8 +190,8 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        labels={'dias_promedio': 'Días de atraso'},
-        title="Top 10 Proveedores – Atraso promedio (seguimiento activo)"
+        title="Top 10 Proveedores – Atraso promedio (seguimiento activo)",
+        labels={'dias_promedio': 'Días de atraso'}
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -206,7 +212,7 @@ columnas_tabla = [
 
 st.subheader("📋 Centros 1000 / 8000")
 st.dataframe(
-    df[df['centro'].isin([1000, 8000])]
+    df[df['centro'].isin(['1000', '8000'])]
       .sort_values(['orden_prioridad', 'dias_atraso'], ascending=[True, False])
       [columnas_tabla],
     use_container_width=True
@@ -214,7 +220,7 @@ st.dataframe(
 
 st.subheader("📋 Centros 2000 / 7000")
 st.dataframe(
-    df[df['centro'].isin([2000, 7000])]
+    df[df['centro'].isin(['2000', '7000'])]
       .sort_values(['orden_prioridad', 'dias_atraso'], ascending=[True, False])
       [columnas_tabla],
     use_container_width=True
