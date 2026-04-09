@@ -10,7 +10,7 @@ from datetime import datetime
 st.set_page_config(page_title="Dashboard Riesgo de Inventarios", layout="wide")
 
 st.title("📊 Dashboard de Riesgo de Inventarios")
-st.caption("Pedidos y órdenes de entrega – atraso y pendiente REAL")
+st.caption("Pedidos y órdenes de entrega – lógica SAP correcta de MR")
 
 # ======================================================
 # CARGA DE ARCHIVO
@@ -42,7 +42,6 @@ pedidos = pedidos.rename(columns={
     'Centro': 'centro',
     'Proveedor': 'num_proveedor',
     'Proveedor TEXT': 'nombre_proveedor',
-    'Fecha de Entrega': 'fecha_mr',
     'Fecha Creación Pedido': 'fecha_pedido',
     'Cantidad Entregada': 'cantidad_entregada',
     'Cantidad (Ejercido)': 'cantidad_pedida'
@@ -51,36 +50,35 @@ pedidos = pedidos.rename(columns={
 # ======================================================
 # FECHAS
 # ======================================================
-for c in ['fecha_mr', 'fecha_pedido']:
-    pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
+pedidos['fecha_pedido'] = pd.to_datetime(pedidos['fecha_pedido'], errors='coerce')
 
 # ======================================================
-# ELIMINAR SIN FECHA DE PEDIDO
+# ELIMINAR REGISTROS NO MEDIBLES
 # ======================================================
 pedidos = pedidos[pedidos['fecha_pedido'].notna()].copy()
 
 # ======================================================
-# ELIMINAR CONVENIOS
+# ELIMINAR CONVENIOS (256**** / 266****)
 # ======================================================
 pedidos['pedido'] = pedidos['pedido'].astype(str)
 pedidos = pedidos[~pedidos['pedido'].str.startswith(('256', '266'))]
 
 # ======================================================
-# LIMPIEZA DE CANTIDAD PEDIDA
+# LIMPIEZA DE CANTIDADES
 # ======================================================
-pedidos['cantidad_pedida'] = pd.to_numeric(
-    pedidos['cantidad_pedida'], errors='coerce'
-).fillna(0)
+pedidos['cantidad_pedida'] = pd.to_numeric(pedidos['cantidad_pedida'], errors='coerce').fillna(0)
+pedidos['cantidad_entregada'] = pd.to_numeric(pedidos['cantidad_entregada'], errors='coerce').fillna(0)
 
 base = pedidos.copy()
 
 # ======================================================
-# ENTREGADO / NO ENTREGADO
+# ✅ MR CORRECTO (REGLA FINAL)
 # ======================================================
-base['entregado'] = base['fecha_mr'].notna()
+# SI cantidad_entregada > 0 → MR EXISTE
+base['entregado'] = base['cantidad_entregada'] > 0
 
 # ======================================================
-# CANTIDAD PENDIENTE REAL ✅
+# CANTIDAD PENDIENTE REAL
 # ======================================================
 base['cantidad_pendiente'] = np.where(
     base['entregado'],
@@ -95,14 +93,14 @@ fecha_hoy = pd.to_datetime(datetime.today().date())
 
 base['dias_atraso'] = np.where(
     base['entregado'],
-    (base['fecha_mr'] - base['fecha_pedido']).dt.days,
+    0,  # Entregados no cuentan como atraso operativo
     (fecha_hoy - base['fecha_pedido']).dt.days
 )
 
 base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype("Int64")
 
 # ======================================================
-# SEMÁFORO + DÍAS
+# ESTATUS VISUAL (SEMÁFORO + TEXTO)
 # ======================================================
 def estatus_atraso(row):
     if row['entregado']:
@@ -140,20 +138,9 @@ base['nombre_proveedor'] = base['nombre_proveedor'].astype(str)
 
 st.sidebar.header("🎛️ Filtros")
 
-grupo_sel = st.sidebar.multiselect(
-    "Grupo de artículos",
-    options=sorted(base['grupo_articulos'].unique())
-)
-
-centro_sel = st.sidebar.multiselect(
-    "Centro",
-    options=sorted(base['centro'].unique())
-)
-
-proveedor_sel = st.sidebar.multiselect(
-    "Proveedor",
-    options=sorted(base['nombre_proveedor'].unique())
-)
+grupo_sel = st.sidebar.multiselect("Grupo de artículos", sorted(base['grupo_articulos'].unique()))
+centro_sel = st.sidebar.multiselect("Centro", sorted(base['centro'].unique()))
+proveedor_sel = st.sidebar.multiselect("Proveedor", sorted(base['nombre_proveedor'].unique()))
 
 df = base.copy()
 if grupo_sel:
@@ -164,7 +151,7 @@ if proveedor_sel:
     df = df[df['nombre_proveedor'].isin(proveedor_sel)]
 
 # ======================================================
-# KPIs
+# KPIs (SOLO NO ENTREGADOS)
 # ======================================================
 df_no_entregados = df[~df['entregado']]
 
@@ -173,9 +160,9 @@ col1.metric("Pedidos en seguimiento", len(df_no_entregados))
 col2.metric("Pedidos críticos (>60 días)", len(df_no_entregados[df_no_entregados['dias_atraso'] > 60]))
 
 # ======================================================
-# TOP 10 PROVEEDORES
+# TOP 10 PROVEEDORES (SOLO SIN MR)
 # ======================================================
-st.subheader("📈 Top 10 proveedores con mayor atraso (activo)")
+st.subheader("📈 Top 10 proveedores con mayor atraso (sin MR)")
 
 top10 = (
     df_no_entregados.groupby(['num_proveedor', 'nombre_proveedor'], as_index=False)
@@ -193,13 +180,13 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        title="Top 10 Proveedores – Atraso promedio",
+        title="Top 10 Proveedores – Atraso real (sin MR)",
         labels={'dias_promedio': 'Días de atraso'}
     )
     st.plotly_chart(fig, use_container_width=True)
 
 # ======================================================
-# TABLAS
+# TABLAS FINALES
 # ======================================================
 columnas_tabla = [
     'pedido',
