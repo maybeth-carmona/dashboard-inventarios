@@ -25,13 +25,10 @@ if not file_pedidos:
     st.warning("⬅️ Sube el archivo para iniciar el análisis")
     st.stop()
 
-# ======================================================
-# LECTURA
-# ======================================================
 df_raw = pd.read_excel(file_pedidos)
 
 # ======================================================
-# NORMALIZACIÓN DE COLUMNAS BASE
+# NORMALIZACIÓN DE COLUMNAS CLAVE
 # ======================================================
 df_raw = df_raw.rename(columns={
     'Pedido de Compras': 'pedido',
@@ -46,43 +43,31 @@ df_raw = df_raw.rename(columns={
 })
 
 # ======================================================
-# DETECTAR CANTIDAD SOLICITADA REAL ✅
+# SELECCIÓN MANUAL DE CANTIDAD SOLICITADA ✅
 # ======================================================
-posibles_columnas_cantidad = [
-    'Cantidad pedido',
-    'Cantidad solicitada',
-    'Cantidad Pedido Original',
-    'Cantidad posición',
-    'Cantidad Base',
-    'Cantidad (Pedido)'
-]
+st.sidebar.subheader("📦 Cantidad solicitada")
 
-col_cantidad_pedida = None
-for col in posibles_columnas_cantidad:
-    if col in df_raw.columns:
-        col_cantidad_pedida = col
-        break
+columnas_numericas = df_raw.columns.tolist()
 
-if col_cantidad_pedida is None:
-    st.error(
-        "❌ No se encontró la columna de cantidad solicitada en el Excel.\n\n"
-        "Pide en SAP una columna como: Cantidad pedido, Cantidad solicitada o Cantidad Pedido Original."
-    )
-    st.stop()
+col_cantidad_pedida = st.sidebar.selectbox(
+    "Selecciona la columna de CANTIDAD SOLICITADA",
+    options=columnas_numericas
+)
 
+# Convertimos esa columna a numérica
 df_raw['cantidad_pedida_real'] = pd.to_numeric(
     df_raw[col_cantidad_pedida], errors='coerce'
 ).fillna(0)
 
-# ======================================================
-# LIMPIEZA DE FECHAS Y CANTIDADES
-# ======================================================
-df_raw['fecha_pedido'] = pd.to_datetime(df_raw['fecha_pedido'], errors='coerce')
-df_raw = df_raw[df_raw['fecha_pedido'].notna()].copy()
-
 df_raw['cantidad_entregada'] = pd.to_numeric(
     df_raw['cantidad_entregada'], errors='coerce'
 ).fillna(0)
+
+# ======================================================
+# FECHA DE PEDIDO (BASE DE ATRASO)
+# ======================================================
+df_raw['fecha_pedido'] = pd.to_datetime(df_raw['fecha_pedido'], errors='coerce')
+df_raw = df_raw[df_raw['fecha_pedido'].notna()].copy()
 
 # ======================================================
 # ELIMINAR CONVENIOS
@@ -91,12 +76,12 @@ df_raw['pedido'] = df_raw['pedido'].astype(str)
 df_raw = df_raw[~df_raw['pedido'].str.startswith(('256', '266'))]
 
 # ======================================================
-# MR CORRECTO
+# MR CORRECTO (SI ENTREGÓ ALGO)
 # ======================================================
 df_raw['entregado'] = df_raw['cantidad_entregada'] > 0
 
 # ======================================================
-# ✅ CANTIDAD PENDIENTE REAL (FINAL)
+# ✅ CANTIDAD PENDIENTE REAL
 # ======================================================
 df_raw['cantidad_pendiente'] = (
     df_raw['cantidad_pedida_real'] - df_raw['cantidad_entregada']
@@ -116,7 +101,7 @@ df_raw['dias_atraso'] = np.where(
 df_raw['dias_atraso'] = df_raw['dias_atraso'].clip(lower=0).astype("Int64")
 
 # ======================================================
-# ESTATUS VISUAL
+# SEMÁFORO + TEXTO
 # ======================================================
 def estatus(row):
     if row['entregado'] and row['cantidad_pendiente'] == 0:
@@ -129,6 +114,20 @@ def estatus(row):
     return f"🟢 {d}"
 
 df_raw['estatus_atraso'] = df_raw.apply(estatus, axis=1)
+
+# ======================================================
+# PRIORIDAD
+# ======================================================
+def prioridad(row):
+    if row['entregado'] and row['cantidad_pendiente'] == 0:
+        return 4
+    if row['dias_atraso'] > 60:
+        return 1
+    if row['dias_atraso'] > 30:
+        return 2
+    return 3
+
+df_raw['orden_prioridad'] = df_raw.apply(prioridad, axis=1)
 
 # ======================================================
 # FILTROS
@@ -161,7 +160,7 @@ col1.metric("Pedidos con pendiente", len(df_pendientes))
 col2.metric("Pedidos críticos (>60 días)", len(df_pendientes[df_pendientes['dias_atraso'] > 60]))
 
 # ======================================================
-# GRÁFICA TOP 10 PROVEEDORES
+# GRÁFICA TOP 10 PROVEEDORES ✅
 # ======================================================
 st.subheader("📈 Top 10 proveedores con mayor atraso")
 
@@ -187,7 +186,7 @@ if not top10.empty:
     st.plotly_chart(fig, use_container_width=True)
 
 # ======================================================
-# TABLAS
+# TABLA FINAL
 # ======================================================
 columnas_tabla = [
     'pedido',
@@ -201,8 +200,8 @@ columnas_tabla = [
     'estatus_atraso'
 ]
 
-st.subheader("📋 Detalle por centros")
+st.subheader("📋 Detalle de pedidos")
 st.dataframe(
-    df.sort_values(['dias_atraso'], ascending=False)[columnas_tabla],
+    df.sort_values('orden_prioridad')[columnas_tabla],
     use_container_width=True
 )
