@@ -87,7 +87,9 @@ base['cantidad_pendiente'] = base['cantidad_pedida'] - base['cantidad_entregada'
 base = base[base['cantidad_pendiente'] > 0]
 
 # ❗ Eliminar registros sin fecha de entrega (no se puede calcular atraso)
-base = base[base['fecha_entrega'].notna()]
+# Si no hay fecha de entrega, usamos fecha de pedido como referencia temporal
+base['fecha_entrega'] = base['fecha_entrega'].fillna(base['fecha_pedido'])
+
 
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
