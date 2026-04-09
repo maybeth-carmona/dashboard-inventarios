@@ -132,3 +132,51 @@ if not top10.empty:
         labels={
             'nombre_proveedor': 'Proveedor',
             'dias_promedio': 'Días de atraso',
+            'pedidos': 'Cantidad de pedidos'
+        }
+    )
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No hay datos suficientes para generar el Top 10.")
+
+# ======================================================
+# SEMÁFORO VISUAL EN TABLA
+# ======================================================
+def color_semaforo(val):
+    if val > 60:
+        return 'background-color: #d7282f; color: white'   # rojo
+    elif val > 30:
+        return 'background-color: #f7b828; color: black'  # amarillo
+    else:
+        return 'background-color: #69a341; color: white'  # verde
+
+# ======================================================
+# TABLAS FINALES (SIN SOLPED, LIMPIAS)
+# ======================================================
+columnas_tabla = [
+    'pedido',
+    'num_proveedor',
+    'nombre_proveedor',
+    'material_sap',
+    'descripcion_material',
+    'grupo_articulos',
+    'centro',
+    'cantidad_pendiente',
+    'dias_atraso'
+]
+
+st.subheader("📋 Centros 1000 / 8000")
+st.dataframe(
+    df[df['centro'].isin([1000, 8000])][columnas_tabla]
+        .sort_values('dias_atraso', ascending=False)
+        .style.applymap(color_semaforo, subset=['dias_atraso']),
+    use_container_width=True
+)
+
+st.subheader("📋 Centros 2000 / 7000")
+st.dataframe(
+    df[df['centro'].isin([2000, 7000])][columnas_tabla]
+        .sort_values('dias_atraso', ascending=False)
+        .style.applymap(color_semaforo, subset=['dias_atraso']),
+    use_container_width=True
+)
