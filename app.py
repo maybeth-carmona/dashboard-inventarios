@@ -13,7 +13,7 @@ st.title("📊 Dashboard de Riesgo de Inventarios")
 st.caption("Pedidos y órdenes de entrega – priorización operativa")
 
 # ======================================================
-# CARGA DE ARCHIVOS
+# CARGA DE ARCHIVO
 # ======================================================
 st.sidebar.header("📂 Carga de archivos SAP")
 
@@ -42,7 +42,7 @@ pedidos = pedidos.rename(columns={
     'Centro': 'centro',
     'Proveedor': 'num_proveedor',
     'Proveedor TEXT': 'nombre_proveedor',
-    'Fecha de Entrega': 'fecha_mr',        # MR
+    'Fecha de Entrega': 'fecha_mr',
     'Fecha Creación Pedido': 'fecha_pedido',
     'Cantidad Entregada': 'cantidad_entregada',
     'Cantidad (Ejercido)': 'cantidad_pedida'
@@ -53,6 +53,12 @@ pedidos = pedidos.rename(columns={
 # ======================================================
 for c in ['fecha_mr', 'fecha_pedido']:
     pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
+
+# ======================================================
+# ELIMINAR REGISTROS SIN FECHA DE PEDIDO ✅
+# (sin fecha no se puede medir atraso)
+# ======================================================
+pedidos = pedidos[pedidos['fecha_pedido'].notna()].copy()
 
 # ======================================================
 # ELIMINAR CONVENIOS (256**** / 266****)
@@ -74,7 +80,7 @@ base = pedidos.copy()
 base['entregado'] = base['fecha_mr'].notna()
 
 # ======================================================
-# DÍAS DE ATRASO
+# DÍAS DE ATRASO (VECTORIAL Y SEGURO)
 # ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
@@ -84,12 +90,13 @@ base['dias_atraso'] = np.where(
     (fecha_hoy - base['fecha_pedido']).dt.days
 )
 
-base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype(int)
+base['dias_atraso'] = base['dias_atraso'].clip(lower=0)
+base['dias_atraso'] = base['dias_atraso'].astype(int)  # ✅ YA SIN NaN
 
 # ======================================================
-# SEMÁFORO + TEXTO FINAL
+# SEMÁFORO + DÍAS EN UNA SOLA CELDA
 # ======================================================
-def atraso_visual(row):
+def dias_con_semaforo(row):
     if row['entregado']:
         return "✅ Entregado"
     d = row['dias_atraso']
@@ -100,10 +107,10 @@ def atraso_visual(row):
     else:
         return f"🟢 {d}"
 
-base['estatus_atraso'] = base.apply(atraso_visual, axis=1)
+base['estatus_atraso'] = base.apply(dias_con_semaforo, axis=1)
 
 # ======================================================
-# PRIORIDAD PARA ORDENAMIENTO
+# PRIORIDAD PARA ORDEN
 # ======================================================
 def prioridad(row):
     if row['entregado']:
@@ -142,7 +149,7 @@ col2.metric("Pedidos críticos (>60 días)", len(df_no_entregados[df_no_entregad
 # ======================================================
 # TOP 10 PROVEEDORES (SIN ENTREGADOS)
 # ======================================================
-st.subheader("📈 Top 10 proveedores con mayor atraso (no entregados)")
+st.subheader("📈 Top 10 proveedores con mayor atraso (seguimiento activo)")
 
 top10 = (
     df_no_entregados.groupby(['num_proveedor', 'nombre_proveedor'], as_index=False)
@@ -160,12 +167,10 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        title="Top 10 Proveedores – Atraso promedio (seguimiento activo)",
-        labels={'nombre_proveedor': 'Proveedor', 'dias_promedio': 'Días de atraso'}
+        labels={'dias_promedio': 'Días de atraso'},
+        title="Top 10 Proveedores – Atraso promedio (activo)"
     )
     st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("No hay pedidos activos para el Top 10.")
 
 # ======================================================
 # TABLAS FINALES
