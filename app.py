@@ -10,7 +10,7 @@ from datetime import datetime
 st.set_page_config(page_title="Dashboard Riesgo de Inventarios", layout="wide")
 
 st.title("📊 Dashboard de Riesgo de Inventarios")
-st.caption("Pedidos y órdenes de entrega – priorización operativa")
+st.caption("Pedidos y órdenes de entrega – atraso y pendiente REAL")
 
 # ======================================================
 # CARGA DE ARCHIVO
@@ -55,22 +55,22 @@ for c in ['fecha_mr', 'fecha_pedido']:
     pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
 
 # ======================================================
-# ELIMINAR REGISTROS SIN FECHA DE PEDIDO
+# ELIMINAR SIN FECHA DE PEDIDO
 # ======================================================
 pedidos = pedidos[pedidos['fecha_pedido'].notna()].copy()
 
 # ======================================================
-# ELIMINAR CONVENIOS (256**** / 266****)
+# ELIMINAR CONVENIOS
 # ======================================================
 pedidos['pedido'] = pedidos['pedido'].astype(str)
 pedidos = pedidos[~pedidos['pedido'].str.startswith(('256', '266'))]
 
 # ======================================================
-# LIMPIEZA DE CANTIDADES
+# LIMPIEZA DE CANTIDAD PEDIDA
 # ======================================================
-pedidos['cantidad_pedida'] = pd.to_numeric(pedidos['cantidad_pedida'], errors='coerce').fillna(0)
-pedidos['cantidad_entregada'] = pd.to_numeric(pedidos['cantidad_entregada'], errors='coerce').fillna(0)
-pedidos['cantidad_pendiente'] = pedidos['cantidad_pedida'] - pedidos['cantidad_entregada']
+pedidos['cantidad_pedida'] = pd.to_numeric(
+    pedidos['cantidad_pedida'], errors='coerce'
+).fillna(0)
 
 base = pedidos.copy()
 
@@ -80,7 +80,16 @@ base = pedidos.copy()
 base['entregado'] = base['fecha_mr'].notna()
 
 # ======================================================
-# CÁLCULO DE DÍAS DE ATRASO (ROBUSTO)
+# CANTIDAD PENDIENTE REAL ✅
+# ======================================================
+base['cantidad_pendiente'] = np.where(
+    base['entregado'],
+    0,
+    base['cantidad_pedida']
+)
+
+# ======================================================
+# DÍAS DE ATRASO
 # ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
@@ -93,7 +102,7 @@ base['dias_atraso'] = np.where(
 base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype("Int64")
 
 # ======================================================
-# SEMÁFORO + TEXTO
+# SEMÁFORO + DÍAS
 # ======================================================
 def estatus_atraso(row):
     if row['entregado']:
@@ -109,7 +118,7 @@ def estatus_atraso(row):
 base['estatus_atraso'] = base.apply(estatus_atraso, axis=1)
 
 # ======================================================
-# PRIORIDAD PARA ORDENAR
+# PRIORIDAD
 # ======================================================
 def prioridad(row):
     if row['entregado']:
@@ -123,15 +132,12 @@ def prioridad(row):
 base['orden_prioridad'] = base.apply(prioridad, axis=1)
 
 # ======================================================
-# PREPARAR COLUMNAS PARA FILTROS (TIPOS SEGUROS)
+# PREPARAR FILTROS
 # ======================================================
 base['grupo_articulos'] = base['grupo_articulos'].astype(str)
 base['centro'] = base['centro'].astype(str)
 base['nombre_proveedor'] = base['nombre_proveedor'].astype(str)
 
-# ======================================================
-# FILTROS
-# ======================================================
 st.sidebar.header("🎛️ Filtros")
 
 grupo_sel = st.sidebar.multiselect(
@@ -150,13 +156,10 @@ proveedor_sel = st.sidebar.multiselect(
 )
 
 df = base.copy()
-
 if grupo_sel:
     df = df[df['grupo_articulos'].isin(grupo_sel)]
-
 if centro_sel:
     df = df[df['centro'].isin(centro_sel)]
-
 if proveedor_sel:
     df = df[df['nombre_proveedor'].isin(proveedor_sel)]
 
@@ -190,13 +193,13 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        title="Top 10 Proveedores – Atraso promedio (seguimiento activo)",
+        title="Top 10 Proveedores – Atraso promedio",
         labels={'dias_promedio': 'Días de atraso'}
     )
     st.plotly_chart(fig, use_container_width=True)
 
 # ======================================================
-# TABLAS FINALES
+# TABLAS
 # ======================================================
 columnas_tabla = [
     'pedido',
