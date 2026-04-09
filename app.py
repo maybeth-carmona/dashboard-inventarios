@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📊 Dashboard de Riesgo de Inventarios")
-st.caption("Días EXACTOS de demora por proveedor (cálculo automático diario)")
+st.caption("Días EXACTOS de demora – semáforo visual por proveedor")
 
 # ======================================================
 # CARGA DE ARCHIVOS
@@ -34,13 +34,13 @@ if not file_solped or not file_pedidos:
     st.stop()
 
 # ======================================================
-# LECTURA DE EXCELES
+# LECTURA
 # ======================================================
 solped = pd.read_excel(file_solped)
 pedidos = pd.read_excel(file_pedidos)
 
 # ======================================================
-# NORMALIZACIÓN DE COLUMNAS (SAP)
+# NORMALIZACIÓN SAP (LIMPIA)
 # ======================================================
 pedidos = pedidos.rename(columns={
     'Pedido de Compras': 'pedido',
@@ -48,77 +48,46 @@ pedidos = pedidos.rename(columns={
     'Texto Breve Posicion': 'descripcion_material',
     'Grupo artículos': 'grupo_articulos',
     'Centro': 'centro',
-    'Proveedor': 'num_proveedor',            # número proveedor
-    'Proveedor TEXT': 'nombre_proveedor',    # nombre proveedor
-    'Fecha de Entrega': 'fecha_entrega',
+    'Proveedor': 'num_proveedor',
+    'Proveedor TEXT': 'nombre_proveedor',
+    'Fecha de Entrega': 'fecha_mr',              # fecha MR (si existe)
     'Fecha Creación Pedido': 'fecha_pedido',
     'Cantidad Entregada': 'cantidad_entregada',
-    'Cantidad (Ejercido)': 'cantidad_pedida',
-    'Número de Solped': 'solped',
-    'Partida de la Solped': 'partida'
+    'Cantidad (Ejercido)': 'cantidad_pedida'
 })
-
-solped = solped.rename(columns={
-    'Número de Solped': 'solped',
-    'Partida de la Solped': 'partida',
-    'Fecha Liberación Solped': 'fecha_lib_solped'
-})
-
-# ======================================================
-# MERGE SOLPED – PEDIDO
-# ======================================================
-base = pedidos.merge(
-    solped[['solped', 'partida', 'fecha_lib_solped']],
-    on=['solped', 'partida'],
-    how='left'
-)
 
 # ======================================================
 # CONVERSIÓN DE FECHAS
 # ======================================================
-for c in ['fecha_entrega', 'fecha_pedido', 'fecha_lib_solped']:
-    base[c] = pd.to_datetime(base[c], errors='coerce')
+for c in ['fecha_mr', 'fecha_pedido']:
+    if c in pedidos.columns:
+        pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
 
 # ======================================================
-# LIMPIEZA Y CÁLCULOS (DÍAS EXACTOS, SIN REDONDEAR)
+# LIMPIEZA Y CANTIDAD PENDIENTE
 # ======================================================
-base['cantidad_entregada'] = base['cantidad_entregada'].fillna(0)
-base['cantidad_pendiente'] = base['cantidad_pedida'] - base['cantidad_entregada']
-base = base[base['cantidad_pendiente'] > 0]
+pedidos['cantidad_entregada'] = pedidos['cantidad_entregada'].fillna(0)
+pedidos['cantidad_pendiente'] = pedidos['cantidad_pedida'] - pedidos['cantidad_entregada']
+base = pedidos[pedidos['cantidad_pendiente'] > 0].copy()
 
-# ❗ Eliminar registros sin fecha de entrega (no se puede calcular atraso)
-# Si no hay fecha de entrega, usamos fecha de pedido como referencia temporal
-base['fecha_entrega'] = base['fecha_entrega'].fillna(base['fecha_pedido'])
-
-
+# ======================================================
+# CÁLCULO DE DÍAS DE ATRASO (REGLA DE NEGOCIO)
+# ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
-# DÍAS EXACTOS DE ATRASO (ENTEROS NATURALES)
-base['dias_atraso'] = (fecha_hoy - base['fecha_entrega']).dt.days
+def calcular_dias_atraso(row):
+    if pd.notna(row['fecha_mr']):
+        return (row['fecha_mr'] - row['fecha_pedido']).days
+    else:
+        return (fecha_hoy - row['fecha_pedido']).days
+
+base['dias_atraso'] = base.apply(calcular_dias_atraso, axis=1)
 base['dias_atraso'] = base['dias_atraso'].clip(lower=0)
-
-# ======================================================
-# RANGO DE ATRASO (SOLO VISUAL)
-# ======================================================
-def rango_atraso(d):
-    if d >= 61:
-        return "+60 días"
-    elif d >= 8:
-        return "8–60 días"
-    return "0–30 días"
-
-base['rango_atraso'] = base['dias_atraso'].apply(rango_atraso)
 
 # ======================================================
 # FILTROS
 # ======================================================
 st.sidebar.header("🎛️ Filtros")
-
-rango_sel = st.sidebar.multiselect(
-    "Rango de días",
-    options=base['rango_atraso'].unique(),
-    default=base['rango_atraso'].unique()
-)
 
 grupo_sel = st.sidebar.multiselect(
     "Grupo de artículos",
@@ -126,9 +95,6 @@ grupo_sel = st.sidebar.multiselect(
 )
 
 df = base.copy()
-
-if rango_sel:
-    df = df[df['rango_atraso'].isin(rango_sel)]
 
 if grupo_sel:
     df = df[df['grupo_articulos'].isin(grupo_sel)]
@@ -139,10 +105,10 @@ if grupo_sel:
 col1, col2 = st.columns(2)
 
 col1.metric("Total pedidos con atraso", len(df))
-col2.metric("Pedidos +60 días", len(df[df['rango_atraso'] == "+60 días"]))
+col2.metric("Pedidos > 60 días", len(df[df['dias_atraso'] > 60]))
 
 # ======================================================
-# TOP 10 PROVEEDORES (CORREGIDO)
+# TOP 10 PROVEEDORES (FUNCIONAL)
 # ======================================================
 st.subheader("📈 Top 10 proveedores con mayor atraso")
 
@@ -162,46 +128,7 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        title="Top 10 Proveedores – DÍAS EXACTOS de atraso promedio",
+        title="Top 10 proveedores – Días EXACTOS de atraso promedio",
         labels={
             'nombre_proveedor': 'Proveedor',
-            'dias_promedio': 'Días exactos de atraso',
-            'pedidos': 'Cantidad de pedidos'
-        }
-    )
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("No hay datos suficientes para generar el Top 10.")
-
-# ======================================================
-# TABLAS LIMPIAS POR CENTRO
-# ======================================================
-columnas_tabla = [
-    'pedido',
-    'solped',
-    'num_proveedor',
-    'nombre_proveedor',
-    'material_sap',
-    'descripcion_material',
-    'grupo_articulos',
-    'centro',
-    'cantidad_pendiente',
-    'dias_atraso',
-    'rango_atraso'
-]
-
-st.subheader("📋 Centros 1000 / 8000")
-st.dataframe(
-    df[df['centro'].isin([1000, 8000])]
-        [columnas_tabla]
-        .sort_values('dias_atraso', ascending=False),
-    use_container_width=True
-)
-
-st.subheader("📋 Centros 2000 / 7000")
-st.dataframe(
-    df[df['centro'].isin([2000, 7000])]
-        [columnas_tabla]
-        .sort_values('dias_atraso', ascending=False),
-    use_container_width=True
-)
+            'dias_promedio': 'Días de atraso',
