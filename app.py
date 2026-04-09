@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📊 Dashboard de Riesgo de Inventarios")
-st.caption("Días EXACTOS de demora – semáforo visual por proveedor")
+st.caption("Días EXACTOS de demora – semáforo visual integrado")
 
 # ======================================================
 # CARGA DE ARCHIVOS
@@ -63,6 +63,15 @@ for c in ['fecha_mr', 'fecha_pedido']:
     pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
 
 # ======================================================
+# CONVENIOS ❌ (ELIMINADOS)
+# 256XXXX / 266XXXX
+# ======================================================
+pedidos['pedido'] = pedidos['pedido'].astype(str)
+pedidos = pedidos[
+    ~pedidos['pedido'].str.startswith(('256', '266'))
+]
+
+# ======================================================
 # CANTIDAD PENDIENTE
 # ======================================================
 pedidos['cantidad_entregada'] = pedidos['cantidad_entregada'].fillna(0)
@@ -70,7 +79,7 @@ pedidos['cantidad_pendiente'] = pedidos['cantidad_pedida'] - pedidos['cantidad_e
 base = pedidos[pedidos['cantidad_pendiente'] > 0].copy()
 
 # ======================================================
-# DÍAS DE ATRASO (REGLA DE NEGOCIO)
+# DÍAS DE ATRASO (LOGICA DE NEGOCIO)
 # ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
@@ -84,17 +93,17 @@ base['dias_atraso'] = base.apply(calcular_dias_atraso, axis=1)
 base['dias_atraso'] = base['dias_atraso'].clip(lower=0)
 
 # ======================================================
-# SEMÁFORO VISUAL (FOQUITO)
+# SEMÁFORO + DÍAS EN UNA SOLA CELDA ✅
 # ======================================================
-def semaforo(d):
+def dias_con_semaforo(d):
     if d > 60:
-        return "🔴"
+        return f"🔴 {d}"
     elif d > 30:
-        return "🟡"
+        return f"🟡 {d}"
     else:
-        return "🟢"
+        return f"🟢 {d}"
 
-base['semaforo'] = base['dias_atraso'].apply(semaforo)
+base['dias_atraso_visual'] = base['dias_atraso'].apply(dias_con_semaforo)
 
 # ======================================================
 # FILTROS
@@ -107,7 +116,6 @@ grupo_sel = st.sidebar.multiselect(
 )
 
 df = base.copy()
-
 if grupo_sel:
     df = df[df['grupo_articulos'].isin(grupo_sel)]
 
@@ -115,7 +123,6 @@ if grupo_sel:
 # KPIs
 # ======================================================
 col1, col2 = st.columns(2)
-
 col1.metric("Total pedidos con atraso", len(df))
 col2.metric("Pedidos > 60 días", len(df[df['dias_atraso'] > 60]))
 
@@ -148,14 +155,11 @@ if not top10.empty:
         }
     )
     st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("No hay datos suficientes para generar el Top 10.")
 
 # ======================================================
 # TABLAS FINALES
 # ======================================================
 columnas_tabla = [
-    'semaforo',
     'pedido',
     'num_proveedor',
     'nombre_proveedor',
@@ -164,7 +168,7 @@ columnas_tabla = [
     'grupo_articulos',
     'centro',
     'cantidad_pendiente',
-    'dias_atraso'
+    'dias_atraso_visual'
 ]
 
 st.subheader("📋 Centros 1000 / 8000")
