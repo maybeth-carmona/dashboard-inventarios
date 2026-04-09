@@ -40,7 +40,7 @@ solped = pd.read_excel(file_solped)
 pedidos = pd.read_excel(file_pedidos)
 
 # ======================================================
-# NORMALIZACIÓN SAP (LIMPIA)
+# NORMALIZACIÓN SAP
 # ======================================================
 pedidos = pedidos.rename(columns={
     'Pedido de Compras': 'pedido',
@@ -50,28 +50,27 @@ pedidos = pedidos.rename(columns={
     'Centro': 'centro',
     'Proveedor': 'num_proveedor',
     'Proveedor TEXT': 'nombre_proveedor',
-    'Fecha de Entrega': 'fecha_mr',              # fecha MR (si existe)
+    'Fecha de Entrega': 'fecha_mr',
     'Fecha Creación Pedido': 'fecha_pedido',
     'Cantidad Entregada': 'cantidad_entregada',
     'Cantidad (Ejercido)': 'cantidad_pedida'
 })
 
 # ======================================================
-# CONVERSIÓN DE FECHAS
+# FECHAS
 # ======================================================
 for c in ['fecha_mr', 'fecha_pedido']:
-    if c in pedidos.columns:
-        pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
+    pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
 
 # ======================================================
-# LIMPIEZA Y CANTIDAD PENDIENTE
+# CANTIDAD PENDIENTE
 # ======================================================
 pedidos['cantidad_entregada'] = pedidos['cantidad_entregada'].fillna(0)
 pedidos['cantidad_pendiente'] = pedidos['cantidad_pedida'] - pedidos['cantidad_entregada']
 base = pedidos[pedidos['cantidad_pendiente'] > 0].copy()
 
 # ======================================================
-# CÁLCULO DE DÍAS DE ATRASO (REGLA DE NEGOCIO)
+# DÍAS DE ATRASO (REGLA DE NEGOCIO)
 # ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
@@ -83,6 +82,19 @@ def calcular_dias_atraso(row):
 
 base['dias_atraso'] = base.apply(calcular_dias_atraso, axis=1)
 base['dias_atraso'] = base['dias_atraso'].clip(lower=0)
+
+# ======================================================
+# SEMÁFORO VISUAL (FOQUITO)
+# ======================================================
+def semaforo(d):
+    if d > 60:
+        return "🔴"
+    elif d > 30:
+        return "🟡"
+    else:
+        return "🟢"
+
+base['semaforo'] = base['dias_atraso'].apply(semaforo)
 
 # ======================================================
 # FILTROS
@@ -108,7 +120,7 @@ col1.metric("Total pedidos con atraso", len(df))
 col2.metric("Pedidos > 60 días", len(df[df['dias_atraso'] > 60]))
 
 # ======================================================
-# TOP 10 PROVEEDORES (FUNCIONAL)
+# TOP 10 PROVEEDORES
 # ======================================================
 st.subheader("📈 Top 10 proveedores con mayor atraso")
 
@@ -128,7 +140,7 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        title="Top 10 proveedores – Días EXACTOS de atraso promedio",
+        title="Top 10 Proveedores – Días EXACTOS de atraso promedio",
         labels={
             'nombre_proveedor': 'Proveedor',
             'dias_promedio': 'Días de atraso',
@@ -140,20 +152,10 @@ else:
     st.info("No hay datos suficientes para generar el Top 10.")
 
 # ======================================================
-# SEMÁFORO VISUAL EN TABLA
-# ======================================================
-def color_semaforo(val):
-    if val > 60:
-        return 'background-color: #d7282f; color: white'   # rojo
-    elif val > 30:
-        return 'background-color: #f7b828; color: black'  # amarillo
-    else:
-        return 'background-color: #69a341; color: white'  # verde
-
-# ======================================================
-# TABLAS FINALES (SIN SOLPED, LIMPIAS)
+# TABLAS FINALES
 # ======================================================
 columnas_tabla = [
+    'semaforo',
     'pedido',
     'num_proveedor',
     'nombre_proveedor',
@@ -167,16 +169,16 @@ columnas_tabla = [
 
 st.subheader("📋 Centros 1000 / 8000")
 st.dataframe(
-    df[df['centro'].isin([1000, 8000])][columnas_tabla]
-        .sort_values('dias_atraso', ascending=False)
-        .style.applymap(color_semaforo, subset=['dias_atraso']),
+    df[df['centro'].isin([1000, 8000])]
+      [columnas_tabla]
+      .sort_values('dias_atraso', ascending=False),
     use_container_width=True
 )
 
 st.subheader("📋 Centros 2000 / 7000")
 st.dataframe(
-    df[df['centro'].isin([2000, 7000])][columnas_tabla]
-        .sort_values('dias_atraso', ascending=False)
-        .style.applymap(color_semaforo, subset=['dias_atraso']),
+    df[df['centro'].isin([2000, 7000])]
+      [columnas_tabla]
+      .sort_values('dias_atraso', ascending=False),
     use_container_width=True
 )
