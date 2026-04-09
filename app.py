@@ -10,7 +10,7 @@ from datetime import datetime
 st.set_page_config(page_title="Dashboard Riesgo de Inventarios", layout="wide")
 
 st.title("📊 Dashboard de Riesgo de Inventarios")
-st.caption("Pedidos y órdenes de entrega – lógica SAP correcta de MR")
+st.caption("Pedidos y órdenes de entrega – atraso y pendiente REAL")
 
 # ======================================================
 # CARGA DE ARCHIVO
@@ -51,14 +51,10 @@ pedidos = pedidos.rename(columns={
 # FECHAS
 # ======================================================
 pedidos['fecha_pedido'] = pd.to_datetime(pedidos['fecha_pedido'], errors='coerce')
-
-# ======================================================
-# ELIMINAR REGISTROS NO MEDIBLES
-# ======================================================
 pedidos = pedidos[pedidos['fecha_pedido'].notna()].copy()
 
 # ======================================================
-# ELIMINAR CONVENIOS (256**** / 266****)
+# ELIMINAR CONVENIOS
 # ======================================================
 pedidos['pedido'] = pedidos['pedido'].astype(str)
 pedidos = pedidos[~pedidos['pedido'].str.startswith(('256', '266'))]
@@ -72,19 +68,16 @@ pedidos['cantidad_entregada'] = pd.to_numeric(pedidos['cantidad_entregada'], err
 base = pedidos.copy()
 
 # ======================================================
-# ✅ MR CORRECTO (REGLA FINAL)
+# MR CORRECTO (HAY ENTREGA SI ENTREGADA > 0)
 # ======================================================
-# SI cantidad_entregada > 0 → MR EXISTE
 base['entregado'] = base['cantidad_entregada'] > 0
 
 # ======================================================
-# CANTIDAD PENDIENTE REAL
+# ✅ CANTIDAD PENDIENTE REAL (AJUSTE FINAL)
 # ======================================================
-base['cantidad_pendiente'] = np.where(
-    base['entregado'],
-    0,
-    base['cantidad_pedida']
-)
+base['cantidad_pendiente'] = (
+    base['cantidad_pedida'] - base['cantidad_entregada']
+).clip(lower=0)
 
 # ======================================================
 # DÍAS DE ATRASO
@@ -93,17 +86,17 @@ fecha_hoy = pd.to_datetime(datetime.today().date())
 
 base['dias_atraso'] = np.where(
     base['entregado'],
-    0,  # Entregados no cuentan como atraso operativo
+    0,
     (fecha_hoy - base['fecha_pedido']).dt.days
 )
 
 base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype("Int64")
 
 # ======================================================
-# ESTATUS VISUAL (SEMÁFORO + TEXTO)
+# SEMÁFORO + DÍAS
 # ======================================================
 def estatus_atraso(row):
-    if row['entregado']:
+    if row['entregado'] and row['cantidad_pendiente'] == 0:
         return "✅ Entregado"
     d = row['dias_atraso']
     if d > 60:
@@ -119,7 +112,7 @@ base['estatus_atraso'] = base.apply(estatus_atraso, axis=1)
 # PRIORIDAD
 # ======================================================
 def prioridad(row):
-    if row['entregado']:
+    if row['entregado'] and row['cantidad_pendiente'] == 0:
         return 4
     if row['dias_atraso'] > 60:
         return 1
@@ -130,7 +123,7 @@ def prioridad(row):
 base['orden_prioridad'] = base.apply(prioridad, axis=1)
 
 # ======================================================
-# PREPARAR FILTROS
+# FILTROS
 # ======================================================
 base['grupo_articulos'] = base['grupo_articulos'].astype(str)
 base['centro'] = base['centro'].astype(str)
@@ -151,42 +144,16 @@ if proveedor_sel:
     df = df[df['nombre_proveedor'].isin(proveedor_sel)]
 
 # ======================================================
-# KPIs (SOLO NO ENTREGADOS)
+# KPIs
 # ======================================================
-df_no_entregados = df[~df['entregado']]
+df_no_entregados = df[df['cantidad_pendiente'] > 0]
 
 col1, col2 = st.columns(2)
 col1.metric("Pedidos en seguimiento", len(df_no_entregados))
 col2.metric("Pedidos críticos (>60 días)", len(df_no_entregados[df_no_entregados['dias_atraso'] > 60]))
 
 # ======================================================
-# TOP 10 PROVEEDORES (SOLO SIN MR)
-# ======================================================
-st.subheader("📈 Top 10 proveedores con mayor atraso (sin MR)")
-
-top10 = (
-    df_no_entregados.groupby(['num_proveedor', 'nombre_proveedor'], as_index=False)
-    .agg(
-        dias_promedio=('dias_atraso', 'mean'),
-        pedidos=('pedido', 'nunique')
-    )
-    .sort_values(['dias_promedio', 'pedidos'], ascending=[False, False])
-    .head(10)
-)
-
-if not top10.empty:
-    fig = px.bar(
-        top10,
-        x='nombre_proveedor',
-        y='dias_promedio',
-        text='pedidos',
-        title="Top 10 Proveedores – Atraso real (sin MR)",
-        labels={'dias_promedio': 'Días de atraso'}
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-# ======================================================
-# TABLAS FINALES
+# TABLAS
 # ======================================================
 columnas_tabla = [
     'pedido',
@@ -198,20 +165,3 @@ columnas_tabla = [
     'centro',
     'cantidad_pendiente',
     'estatus_atraso'
-]
-
-st.subheader("📋 Centros 1000 / 8000")
-st.dataframe(
-    df[df['centro'].isin(['1000', '8000'])]
-      .sort_values(['orden_prioridad', 'dias_atraso'], ascending=[True, False])
-      [columnas_tabla],
-    use_container_width=True
-)
-
-st.subheader("📋 Centros 2000 / 7000")
-st.dataframe(
-    df[df['centro'].isin(['2000', '7000'])]
-      .sort_values(['orden_prioridad', 'dias_atraso'], ascending=[True, False])
-      [columnas_tabla],
-    use_container_width=True
-)
