@@ -55,21 +55,16 @@ for c in ['fecha_mr', 'fecha_pedido']:
     pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
 
 # ======================================================
-# ELIMINAR REGISTROS SIN FECHA DE PEDIDO ✅
-# (sin fecha no se puede medir atraso)
-# ======================================================
-pedidos = pedidos[pedidos['fecha_pedido'].notna()].copy()
-
-# ======================================================
 # ELIMINAR CONVENIOS (256**** / 266****)
 # ======================================================
 pedidos['pedido'] = pedidos['pedido'].astype(str)
 pedidos = pedidos[~pedidos['pedido'].str.startswith(('256', '266'))]
 
 # ======================================================
-# CANTIDAD PENDIENTE
+# LIMPIEZA DE CANTIDADES ✅ (CORRECCIÓN CLAVE)
 # ======================================================
-pedidos['cantidad_entregada'] = pedidos['cantidad_entregada'].fillna(0)
+pedidos['cantidad_pedida'] = pd.to_numeric(pedidos['cantidad_pedida'], errors='coerce').fillna(0)
+pedidos['cantidad_entregada'] = pd.to_numeric(pedidos['cantidad_entregada'], errors='coerce').fillna(0)
 pedidos['cantidad_pendiente'] = pedidos['cantidad_pedida'] - pedidos['cantidad_entregada']
 
 base = pedidos.copy()
@@ -80,7 +75,7 @@ base = pedidos.copy()
 base['entregado'] = base['fecha_mr'].notna()
 
 # ======================================================
-# DÍAS DE ATRASO (VECTORIAL Y SEGURO)
+# DÍAS DE ATRASO
 # ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
@@ -90,13 +85,12 @@ base['dias_atraso'] = np.where(
     (fecha_hoy - base['fecha_pedido']).dt.days
 )
 
-base['dias_atraso'] = base['dias_atraso'].clip(lower=0)
-base['dias_atraso'] = base['dias_atraso'].astype(int)  # ✅ YA SIN NaN
+base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype(int)
 
 # ======================================================
-# SEMÁFORO + DÍAS EN UNA SOLA CELDA
+# SEMÁFORO + DÍAS EN LA MISMA CELDA
 # ======================================================
-def dias_con_semaforo(row):
+def atraso_visual(row):
     if row['entregado']:
         return "✅ Entregado"
     d = row['dias_atraso']
@@ -107,7 +101,7 @@ def dias_con_semaforo(row):
     else:
         return f"🟢 {d}"
 
-base['estatus_atraso'] = base.apply(dias_con_semaforo, axis=1)
+base['estatus_atraso'] = base.apply(atraso_visual, axis=1)
 
 # ======================================================
 # PRIORIDAD PARA ORDEN
@@ -124,18 +118,35 @@ def prioridad(row):
 base['orden_prioridad'] = base.apply(prioridad, axis=1)
 
 # ======================================================
-# FILTROS
+# FILTROS (GRUPO · CENTRO · PROVEEDOR)
 # ======================================================
 st.sidebar.header("🎛️ Filtros")
 
 grupo_sel = st.sidebar.multiselect(
     "Grupo de artículos",
-    options=base['grupo_articulos'].dropna().unique()
+    options=sorted(base['grupo_articulos'].dropna().unique())
+)
+
+centro_sel = st.sidebar.multiselect(
+    "Centro",
+    options=sorted(base['centro'].dropna().unique())
+)
+
+proveedor_sel = st.sidebar.multiselect(
+    "Proveedor",
+    options=sorted(base['nombre_proveedor'].dropna().unique())
 )
 
 df = base.copy()
+
 if grupo_sel:
     df = df[df['grupo_articulos'].isin(grupo_sel)]
+
+if centro_sel:
+    df = df[df['centro'].isin(centro_sel)]
+
+if proveedor_sel:
+    df = df[df['nombre_proveedor'].isin(proveedor_sel)]
 
 # ======================================================
 # KPIs (SOLO NO ENTREGADOS)
