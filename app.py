@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 st.title("📊 Dashboard de Riesgo de Inventarios")
-st.caption("Días EXACTOS de demora – semáforo visual integrado")
+st.caption("Días EXACTOS de demora – semáforo integrado por pedido")
 
 # ======================================================
 # CARGA DE ARCHIVOS
@@ -35,13 +35,13 @@ if not file_solped or not file_pedidos:
     st.stop()
 
 # ======================================================
-# LECTURA
+# LECTURA DE ARCHIVOS
 # ======================================================
 solped = pd.read_excel(file_solped)
 pedidos = pd.read_excel(file_pedidos)
 
 # ======================================================
-# NORMALIZACIÓN SAP
+# NORMALIZACIÓN SAP (SOLO LO NECESARIO)
 # ======================================================
 pedidos = pedidos.rename(columns={
     'Pedido de Compras': 'pedido',
@@ -51,14 +51,14 @@ pedidos = pedidos.rename(columns={
     'Centro': 'centro',
     'Proveedor': 'num_proveedor',
     'Proveedor TEXT': 'nombre_proveedor',
-    'Fecha de Entrega': 'fecha_mr',        # MR
+    'Fecha de Entrega': 'fecha_mr',          # MR (si existe)
     'Fecha Creación Pedido': 'fecha_pedido',
     'Cantidad Entregada': 'cantidad_entregada',
     'Cantidad (Ejercido)': 'cantidad_pedida'
 })
 
 # ======================================================
-# FECHAS
+# CONVERSIÓN DE FECHAS
 # ======================================================
 for c in ['fecha_mr', 'fecha_pedido']:
     pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
@@ -79,7 +79,10 @@ pedidos['cantidad_pendiente'] = pedidos['cantidad_pedida'] - pedidos['cantidad_e
 base = pedidos[pedidos['cantidad_pendiente'] > 0].copy()
 
 # ======================================================
-# DÍAS DE ATRASO (VECTORIAL, ROBUSTO)
+# CÁLCULO DE DÍAS DE ATRASO (VECTORIAL, CORRECTO)
+# Regla:
+# - Si hay MR → MR - fecha pedido
+# - Si no hay MR → hoy - fecha pedido
 # ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
@@ -92,7 +95,7 @@ base['dias_atraso'] = np.where(
 base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype(int)
 
 # ======================================================
-# SEMÁFORO EN LA MISMA CELDA
+# SEMÁFORO + DÍAS EN LA MISMA CELDA
 # ======================================================
 def dias_con_semaforo(d):
     if d > 60:
@@ -122,6 +125,7 @@ if grupo_sel:
 # KPIs
 # ======================================================
 col1, col2 = st.columns(2)
+
 col1.metric("Total pedidos con atraso", len(df))
 col2.metric("Pedidos > 60 días", len(df[df['dias_atraso'] > 60]))
 
@@ -146,7 +150,7 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        title="Top 10 Proveedores – DÍAS EXACTOS de atraso promedio",
+        title="Top 10 Proveedores – Días EXACTOS de atraso promedio",
         labels={
             'nombre_proveedor': 'Proveedor',
             'dias_promedio': 'Días de atraso',
@@ -154,9 +158,11 @@ if not top10.empty:
         }
     )
     st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No hay datos suficientes para generar el Top 10.")
 
 # ======================================================
-# TABLAS FINALES
+# TABLAS FINALES (ORDEN CORRECTO ✅)
 # ======================================================
 columnas_tabla = [
     'pedido',
@@ -173,15 +179,15 @@ columnas_tabla = [
 st.subheader("📋 Centros 1000 / 8000")
 st.dataframe(
     df[df['centro'].isin([1000, 8000])]
-        [columnas_tabla]
-        .sort_values('dias_atraso', ascending=False),
+      .sort_values('dias_atraso', ascending=False)
+      [columnas_tabla],
     use_container_width=True
 )
 
 st.subheader("📋 Centros 2000 / 7000")
 st.dataframe(
     df[df['centro'].isin([2000, 7000])]
-        [columnas_tabla]
-        .sort_values('dias_atraso', ascending=False),
+      .sort_values('dias_atraso', ascending=False)
+      [columnas_tabla],
     use_container_width=True
 )
