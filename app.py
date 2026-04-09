@@ -8,9 +8,8 @@ from datetime import datetime
 # CONFIGURACIÓN GENERAL
 # ======================================================
 st.set_page_config(page_title="Dashboard Riesgo de Inventarios", layout="wide")
-
 st.title("📊 Dashboard de Riesgo de Inventarios")
-st.caption("Atraso y pendiente operativo según estatus SAP")
+st.caption("Pendiente REAL = Cantidad solicitada − Cantidad entregada")
 
 # ======================================================
 # CARGA DE ARCHIVO
@@ -32,7 +31,7 @@ if not file_pedidos:
 df_raw = pd.read_excel(file_pedidos)
 
 # ======================================================
-# NORMALIZACIÓN SAP
+# NORMALIZACIÓN DE COLUMNAS BASE
 # ======================================================
 df_raw = df_raw.rename(columns={
     'Pedido de Compras': 'pedido',
@@ -43,15 +42,47 @@ df_raw = df_raw.rename(columns={
     'Proveedor': 'num_proveedor',
     'Proveedor TEXT': 'nombre_proveedor',
     'Fecha Creación Pedido': 'fecha_pedido',
-    'Cantidad Entregada': 'cantidad_entregada',
-    'Cantidad (Ejercido)': 'cantidad_pedida'
+    'Cantidad Entregada': 'cantidad_entregada'
 })
 
 # ======================================================
-# FECHAS
+# DETECTAR CANTIDAD SOLICITADA REAL ✅
+# ======================================================
+posibles_columnas_cantidad = [
+    'Cantidad pedido',
+    'Cantidad solicitada',
+    'Cantidad Pedido Original',
+    'Cantidad posición',
+    'Cantidad Base',
+    'Cantidad (Pedido)'
+]
+
+col_cantidad_pedida = None
+for col in posibles_columnas_cantidad:
+    if col in df_raw.columns:
+        col_cantidad_pedida = col
+        break
+
+if col_cantidad_pedida is None:
+    st.error(
+        "❌ No se encontró la columna de cantidad solicitada en el Excel.\n\n"
+        "Pide en SAP una columna como: Cantidad pedido, Cantidad solicitada o Cantidad Pedido Original."
+    )
+    st.stop()
+
+df_raw['cantidad_pedida_real'] = pd.to_numeric(
+    df_raw[col_cantidad_pedida], errors='coerce'
+).fillna(0)
+
+# ======================================================
+# LIMPIEZA DE FECHAS Y CANTIDADES
 # ======================================================
 df_raw['fecha_pedido'] = pd.to_datetime(df_raw['fecha_pedido'], errors='coerce')
 df_raw = df_raw[df_raw['fecha_pedido'].notna()].copy()
+
+df_raw['cantidad_entregada'] = pd.to_numeric(
+    df_raw['cantidad_entregada'], errors='coerce'
+).fillna(0)
 
 # ======================================================
 # ELIMINAR CONVENIOS
@@ -60,27 +91,16 @@ df_raw['pedido'] = df_raw['pedido'].astype(str)
 df_raw = df_raw[~df_raw['pedido'].str.startswith(('256', '266'))]
 
 # ======================================================
-# LIMPIEZA DE CANTIDADES
-# ======================================================
-df_raw['cantidad_pedida'] = pd.to_numeric(df_raw['cantidad_pedida'], errors='coerce').fillna(0)
-df_raw['cantidad_entregada'] = pd.to_numeric(df_raw['cantidad_entregada'], errors='coerce').fillna(0)
-
-# ======================================================
 # MR CORRECTO
 # ======================================================
 df_raw['entregado'] = df_raw['cantidad_entregada'] > 0
 
 # ======================================================
-# ✅ CANTIDAD PENDIENTE OPERATIVA (SAP REAL)
+# ✅ CANTIDAD PENDIENTE REAL (FINAL)
 # ======================================================
 df_raw['cantidad_pendiente'] = (
-    df_raw['cantidad_pedida'] - df_raw['cantidad_entregada']
+    df_raw['cantidad_pedida_real'] - df_raw['cantidad_entregada']
 ).clip(lower=0)
-
-# NOTA IMPORTANTE:
-# Si SAP ajusta cantidad_pedida = entregada,
-# no existe forma técnica de recuperar pendiente real
-# sin la columna "Cantidad Pedido Original"
 
 # ======================================================
 # DÍAS DE ATRASO
@@ -96,9 +116,9 @@ df_raw['dias_atraso'] = np.where(
 df_raw['dias_atraso'] = df_raw['dias_atraso'].clip(lower=0).astype("Int64")
 
 # ======================================================
-# SEMÁFORO + TEXTO
+# ESTATUS VISUAL
 # ======================================================
-def estatus_atraso(row):
+def estatus(row):
     if row['entregado'] and row['cantidad_pendiente'] == 0:
         return "✅ Entregado"
     d = row['dias_atraso']
@@ -106,24 +126,9 @@ def estatus_atraso(row):
         return f"🔴 {d}"
     elif d > 30:
         return f"🟡 {d}"
-    else:
-        return f"🟢 {d}"
+    return f"🟢 {d}"
 
-df_raw['estatus_atraso'] = df_raw.apply(estatus_atraso, axis=1)
-
-# ======================================================
-# PRIORIDAD
-# ======================================================
-def prioridad(row):
-    if row['entregado'] and row['cantidad_pendiente'] == 0:
-        return 4
-    if row['dias_atraso'] > 60:
-        return 1
-    if row['dias_atraso'] > 30:
-        return 2
-    return 3
-
-df_raw['orden_prioridad'] = df_raw.apply(prioridad, axis=1)
+df_raw['estatus_atraso'] = df_raw.apply(estatus, axis=1)
 
 # ======================================================
 # FILTROS
@@ -134,7 +139,7 @@ df_raw['nombre_proveedor'] = df_raw['nombre_proveedor'].astype(str)
 
 st.sidebar.header("🎛️ Filtros")
 
-grupo_sel = st.sidebar.multiselect("Grupo de artículos", sorted(df_raw['grupo_articulos'].unique()))
+grupo_sel = st.sidebar.multiselect("Grupo artículos", sorted(df_raw['grupo_articulos'].unique()))
 centro_sel = st.sidebar.multiselect("Centro", sorted(df_raw['centro'].unique()))
 proveedor_sel = st.sidebar.multiselect("Proveedor", sorted(df_raw['nombre_proveedor'].unique()))
 
@@ -149,19 +154,19 @@ if proveedor_sel:
 # ======================================================
 # KPIs
 # ======================================================
-df_no_entregados = df[df['cantidad_pendiente'] > 0]
+df_pendientes = df[df['cantidad_pendiente'] > 0]
 
 col1, col2 = st.columns(2)
-col1.metric("Pedidos en seguimiento", len(df_no_entregados))
-col2.metric("Pedidos críticos (>60 días)", len(df_no_entregados[df_no_entregados['dias_atraso'] > 60]))
+col1.metric("Pedidos con pendiente", len(df_pendientes))
+col2.metric("Pedidos críticos (>60 días)", len(df_pendientes[df_pendientes['dias_atraso'] > 60]))
 
 # ======================================================
-# ✅ GRÁFICA TOP 10 PROVEEDORES (DE REGRESO)
+# GRÁFICA TOP 10 PROVEEDORES
 # ======================================================
-st.subheader("📈 Top 10 proveedores con mayor atraso (activo)")
+st.subheader("📈 Top 10 proveedores con mayor atraso")
 
 top10 = (
-    df_no_entregados.groupby(['nombre_proveedor'], as_index=False)
+    df_pendientes.groupby('nombre_proveedor', as_index=False)
     .agg(
         dias_promedio=('dias_atraso', 'mean'),
         pedidos=('pedido', 'nunique')
@@ -176,8 +181,8 @@ if not top10.empty:
         x='nombre_proveedor',
         y='dias_promedio',
         text='pedidos',
-        labels={'dias_promedio': 'Días de atraso'},
-        title="Top 10 Proveedores – Atraso promedio"
+        labels={'dias_promedio': 'Días atraso'},
+        title="Top 10 Proveedores con atraso y pendiente"
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -196,18 +201,8 @@ columnas_tabla = [
     'estatus_atraso'
 ]
 
-st.subheader("📋 Centros 1000 / 8000")
+st.subheader("📋 Detalle por centros")
 st.dataframe(
-    df[df['centro'].isin(['1000', '8000'])]
-      .sort_values(['orden_prioridad', 'dias_atraso'], ascending=[True, False])
-      [columnas_tabla],
-    use_container_width=True
-)
-
-st.subheader("📋 Centros 2000 / 7000")
-st.dataframe(
-    df[df['centro'].isin(['2000', '7000'])]
-      .sort_values(['orden_prioridad', 'dias_atraso'], ascending=[True, False])
-      [columnas_tabla],
+    df.sort_values(['dias_atraso'], ascending=False)[columnas_tabla],
     use_container_width=True
 )
