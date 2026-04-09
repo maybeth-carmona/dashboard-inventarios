@@ -55,13 +55,18 @@ for c in ['fecha_mr', 'fecha_pedido']:
     pedidos[c] = pd.to_datetime(pedidos[c], errors='coerce')
 
 # ======================================================
+# ELIMINAR REGISTROS SIN FECHA DE PEDIDO (NO MEDIBLES)
+# ======================================================
+pedidos = pedidos[pedidos['fecha_pedido'].notna()].copy()
+
+# ======================================================
 # ELIMINAR CONVENIOS (256**** / 266****)
 # ======================================================
 pedidos['pedido'] = pedidos['pedido'].astype(str)
 pedidos = pedidos[~pedidos['pedido'].str.startswith(('256', '266'))]
 
 # ======================================================
-# LIMPIEZA DE CANTIDADES ✅ (CORRECCIÓN CLAVE)
+# LIMPIEZA DE CANTIDADES
 # ======================================================
 pedidos['cantidad_pedida'] = pd.to_numeric(pedidos['cantidad_pedida'], errors='coerce').fillna(0)
 pedidos['cantidad_entregada'] = pd.to_numeric(pedidos['cantidad_entregada'], errors='coerce').fillna(0)
@@ -75,7 +80,7 @@ base = pedidos.copy()
 base['entregado'] = base['fecha_mr'].notna()
 
 # ======================================================
-# DÍAS DE ATRASO
+# CÁLCULO DE DÍAS DE ATRASO (ROBUSTO)
 # ======================================================
 fecha_hoy = pd.to_datetime(datetime.today().date())
 
@@ -85,12 +90,13 @@ base['dias_atraso'] = np.where(
     (fecha_hoy - base['fecha_pedido']).dt.days
 )
 
-base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype(int)
+# ✅ CLAVE: USAR INT64 NULLABLE (NO TRUENA)
+base['dias_atraso'] = base['dias_atraso'].clip(lower=0).astype("Int64")
 
 # ======================================================
 # SEMÁFORO + DÍAS EN LA MISMA CELDA
 # ======================================================
-def atraso_visual(row):
+def estatus_atraso(row):
     if row['entregado']:
         return "✅ Entregado"
     d = row['dias_atraso']
@@ -101,7 +107,7 @@ def atraso_visual(row):
     else:
         return f"🟢 {d}"
 
-base['estatus_atraso'] = base.apply(atraso_visual, axis=1)
+base['estatus_atraso'] = base.apply(estatus_atraso, axis=1)
 
 # ======================================================
 # PRIORIDAD PARA ORDEN
@@ -118,7 +124,7 @@ def prioridad(row):
 base['orden_prioridad'] = base.apply(prioridad, axis=1)
 
 # ======================================================
-# FILTROS (GRUPO · CENTRO · PROVEEDOR)
+# FILTROS
 # ======================================================
 st.sidebar.header("🎛️ Filtros")
 
@@ -158,9 +164,9 @@ col1.metric("Pedidos en seguimiento", len(df_no_entregados))
 col2.metric("Pedidos críticos (>60 días)", len(df_no_entregados[df_no_entregados['dias_atraso'] > 60]))
 
 # ======================================================
-# TOP 10 PROVEEDORES (SIN ENTREGADOS)
+# TOP 10 PROVEEDORES
 # ======================================================
-st.subheader("📈 Top 10 proveedores con mayor atraso (seguimiento activo)")
+st.subheader("📈 Top 10 proveedores con mayor atraso (activo)")
 
 top10 = (
     df_no_entregados.groupby(['num_proveedor', 'nombre_proveedor'], as_index=False)
@@ -179,7 +185,7 @@ if not top10.empty:
         y='dias_promedio',
         text='pedidos',
         labels={'dias_promedio': 'Días de atraso'},
-        title="Top 10 Proveedores – Atraso promedio (activo)"
+        title="Top 10 Proveedores – Atraso promedio (seguimiento activo)"
     )
     st.plotly_chart(fig, use_container_width=True)
 
