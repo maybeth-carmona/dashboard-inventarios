@@ -13,7 +13,6 @@ hoy = pd.to_datetime(datetime.today().date())
 # CARGA DE ARCHIVOS
 # =========================
 st.sidebar.header("Archivos SAP")
-
 file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
 file_sol = st.sidebar.file_uploader("Solicitudes de Pedido (Solped)", type=["xlsx"])
 
@@ -33,26 +32,45 @@ ped = ped.rename(columns={
     "Proveedor TEXT": "proveedor",
     "Material": "material",
     "Texto Breve Posicion": "descripcion",
-    "Grupo artículos": "grupo",
+    "Grupo artículos": "grupo_articulos",
     "Centro": "centro",
     "Fecha Creación Pedido": "fecha_pedido",
     "Fecha de Entrega": "fecha_entrega",
-    "Cantidad Entregada": "entregada"
+    "Cantidad Entregada": "cantidad_entregada"
 })
 
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce")
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce")
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-ped["entregada"] = pd.to_numeric(ped["entregada"], errors="coerce").fillna(0)
+ped["cantidad_entregada"] = pd.to_numeric(
+    ped["cantidad_entregada"], errors="coerce"
+).fillna(0)
 
+# 🔑 NORMALIZAR A TEXTO PARA FILTROS (CLAVE)
+ped["proveedor"] = ped["proveedor"].astype(str)
+ped["grupo_articulos"] = ped["grupo_articulos"].astype(str)
+ped["centro"] = ped["centro"].astype(str)
+
+# Cantidad solicitada
 st.sidebar.subheader("Cantidad solicitada (Pedidos)")
-col_cant = st.sidebar.selectbox("Columna cantidad pedida", ped.columns.tolist())
-ped["cantidad_pedida"] = pd.to_numeric(ped[col_cant], errors="coerce").fillna(0)
+col_cant = st.sidebar.selectbox(
+    "Columna cantidad pedida",
+    ped.columns.tolist()
+)
+ped["cantidad_pedida"] = pd.to_numeric(
+    ped[col_cant], errors="coerce"
+).fillna(0)
 
-ped["pendiente"] = (ped["cantidad_pedida"] - ped["entregada"]).clip(lower=0)
-ped["entregado"] = ped["entregada"] > 0
+# MR real
+ped["entregado"] = ped["cantidad_entregada"] > 0
 
+# Cantidad pendiente real
+ped["pendiente"] = (
+    ped["cantidad_pedida"] - ped["cantidad_entregada"]
+).clip(lower=0)
+
+# Días de demora vs fecha compromiso
 ped["dias_demora"] = pd.Series(
     np.where(
         ped["fecha_entrega"].notna(),
@@ -74,29 +92,48 @@ def sem_prov(row):
 
 ped["estatus"] = ped.apply(sem_prov, axis=1)
 
-f_proveedor = st.multiselect("Proveedor", sorted(ped["proveedor"].dropna().unique()))
-f_grupo = st.multiselect("Grupo artículos", sorted(ped["grupo"].dropna().unique()))
-f_centro = st.multiselect("Centro", sorted(ped["centro"].dropna().unique()))
+# ---- Filtros proveedores
+st.subheader("Filtros Proveedores")
+
+f_proveedor = st.multiselect(
+    "Proveedor",
+    sorted(ped["proveedor"].dropna().unique())
+)
+f_grupo = st.multiselect(
+    "Grupo artículos",
+    sorted(ped["grupo_articulos"].dropna().unique())
+)
+f_centro = st.multiselect(
+    "Centro",
+    sorted(ped["centro"].dropna().unique())
+)
 
 dfp = ped.copy()
 if f_proveedor:
     dfp = dfp[dfp["proveedor"].isin(f_proveedor)]
 if f_grupo:
-    dfp = dfp[dfp["grupo"].isin(f_grupo)]
+    dfp = dfp[dfp["grupo_articulos"].isin(f_grupo)]
 if f_centro:
     dfp = dfp[dfp["centro"].isin(f_centro)]
 
 st.metric("Pedidos con pendiente", len(dfp[dfp["pendiente"] > 0]))
 
+# Gráfica proveedores
 top_prov = (
     dfp[dfp["pendiente"] > 0]
     .groupby("proveedor", as_index=False)
     .agg(dias_promedio=("dias_demora", "mean"))
     .sort_values("dias_promedio", ascending=False)
+    .head(10)
 )
 
 st.plotly_chart(
-    px.bar(top_prov, x="proveedor", y="dias_promedio", title="Demora por proveedor"),
+    px.bar(
+        top_prov,
+        x="proveedor",
+        y="dias_promedio",
+        title="Top 10 proveedores con mayor demora",
+    ),
     use_container_width=True,
 )
 
@@ -109,7 +146,7 @@ st.dataframe(
             "proveedor",
             "material",
             "descripcion",
-            "grupo",
+            "grupo_articulos",
             "centro",
             "fecha_pedido",
             "fecha_entrega",
@@ -137,6 +174,8 @@ sol = sol.rename(columns={
 sol["fecha_lib"] = pd.to_datetime(sol["fecha_lib"], errors="coerce")
 sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
 sol["pedido"] = sol["pedido"].fillna("SIN TRATAMIENTO")
+
+sol["grupo_compras"] = sol["grupo_compras"].astype(str)
 
 sol["dias_sin_atender"] = pd.Series(
     np.where(
@@ -169,7 +208,8 @@ def sem_comp(d):
 sol["estatus"] = sol["dias_sin_atender"].apply(sem_comp)
 
 sol = sol.sort_values(
-    by=["pedido", "dias_sin_atender"], ascending=[True, False]
+    by=["pedido", "dias_sin_atender"],
+    ascending=[True, False]
 )
 
 st.dataframe(
@@ -196,6 +236,7 @@ grp = (
 )
 
 st.plotly_chart(
-    px.bar(grp, x="grupo_compras", y="promedio", title="Desempeño grupos de compra"),
+    px.bar(grp, x="grupo_compras", y="promedio",
+           title="Desempeño grupos de compra"),
     use_container_width=True,
 )
