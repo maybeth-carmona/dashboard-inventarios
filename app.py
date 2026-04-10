@@ -7,27 +7,26 @@ from datetime import datetime
 # =====================================================
 # CONFIG GENERAL
 # =====================================================
-st.set_page_config(page_title="Dashboard Compras", layout="wide")
-st.title("📊 Dashboard Operativo de Compras")
+st.set_page_config(page_title="Dashboard Proveedores", layout="wide")
+st.title("📊 Seguimiento a Proveedores – Compras")
 
 HOY = pd.to_datetime(datetime.today().date())
 
 # =====================================================
-# CARGA ARCHIVOS
+# CARGA ARCHIVO
 # =====================================================
-st.sidebar.header("📂 Archivos SAP")
+st.sidebar.header("📂 Archivo SAP")
 
 file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
-file_sol = st.sidebar.file_uploader("Solicitudes de Pedido (Solped)", type=["xlsx"])
 
-if file_ped is None or file_sol is None:
+if file_ped is None:
+    st.info("⬅️ Carga el archivo de Pedidos de Compras")
     st.stop()
 
 ped = pd.read_excel(file_ped)
-sol = pd.read_excel(file_sol)
 
 # =====================================================
-# 🚚 SEGUIMIENTO A PROVEEDORES (CONGELADO ✅)
+# 🚚 SEGUIMIENTO A PROVEEDORES
 # =====================================================
 st.header("🚚 Seguimiento a Proveedores")
 
@@ -45,29 +44,33 @@ ped = ped.rename(columns={
 
 ped["pedido"] = ped["pedido"].astype(str)
 
-# Quitar convenios
+# ❌ Quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# Fechas sin hora
+# ✅ Fechas SIN hora
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-# Cantidades
+# ✅ Cantidades
 ped["cantidad_entregada"] = pd.to_numeric(
     ped["cantidad_entregada"], errors="coerce"
 ).fillna(0)
 
-# Cantidad solicitada
+# ✅ Cantidad solicitada
 st.sidebar.subheader("📦 Cantidad solicitada")
-col_cant = st.sidebar.selectbox("Columna de cantidad pedida", ped.columns.tolist())
+col_cant = st.sidebar.selectbox(
+    "Columna de cantidad pedida",
+    ped.columns.tolist()
+)
+
 ped["cantidad_pedida"] = pd.to_numeric(
     ped[col_cant], errors="coerce"
 ).fillna(0)
 
-# -----------------------------------------------------
-# RESUMEN POR PEDIDO (NEGOCIO)
-# -----------------------------------------------------
+# =====================================================
+# RESUMEN POR PEDIDO (LÓGICA VALIDADA)
+# =====================================================
 resumen = (
     ped.groupby("pedido", as_index=False)
     .agg(
@@ -84,7 +87,7 @@ resumen["pendiente_pedido"] = (
     resumen["pedida_total"] - resumen["entregada_total"]
 ).clip(lower=0)
 
-# Criterio operativo
+# ✅ Criterio operativo
 resumen["tiene_mr"] = resumen["entregada_total"] > 0
 
 resumen["dias_demora"] = (
@@ -94,12 +97,16 @@ resumen["dias_demora"] = (
     .clip(lower=0)
 )
 
+# Volver a detalle
 ped = ped.merge(
     resumen[["pedido", "pendiente_pedido", "tiene_mr", "dias_demora"]],
     on="pedido",
     how="left"
 )
 
+# =====================================================
+# SEMÁFORO (CONSERVADO)
+# =====================================================
 def estatus_proveedor(row):
     if row["tiene_mr"]:
         return "✅ Entregado"
@@ -144,7 +151,7 @@ c1.metric("📦 Pedidos SIN MR", kpi_pend)
 c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
-# 📊 GRÁFICA
+# 📊 GRÁFICA FINAL (VERDE CORPORATIVO)
 # =====================================================
 top10 = (
     dfp[~dfp["tiene_mr"]]
@@ -159,65 +166,33 @@ fig = px.bar(
     x="proveedor",
     y="promedio",
     title="📊 Proveedores con pedidos pendientes",
-    color_discrete_sequence=["#FF671D", "#BABD13", "#CDC1AC"]
+    color_discrete_sequence=["#69A341"]
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-st.dataframe(dfp, use_container_width=True)
-
 # =====================================================
-# 🧑‍💼 SEGUIMIENTO A COMPRADORES (ARREGLADO ✅)
+# 📋 TABLA FINAL
 # =====================================================
-st.header("🧑‍💼 Seguimiento a Compradores")
-
-# Renombrar columnas reales del Excel
-sol = sol.rename(columns={
-    "Número de Solped": "solped",
-    "Grupo de compras": "grupo_compras",
-    "Pedido de Compras": "pedido",
-    "Fecha Liberación Solped": "fecha_lib",   # J1
-    "Fecha Creación Pedido": "fecha_pedido"  # K1
-})
-
-sol["solped"] = sol["solped"].astype(str)
-sol["pedido"] = sol["pedido"].astype(str).str.replace(".0", "", regex=False)
-
-# Todas las solpeds tienen fecha de liberación
-sol["fecha_lib"] = pd.to_datetime(sol["fecha_lib"], errors="coerce")
-sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
-
-# Días desde liberación
-sol["dias_desde_lib"] = (HOY - sol["fecha_lib"]).dt.days
-
-# Días en atención (solo si ya hay pedido)
-sol["dias_atencion"] = np.where(
-    sol["pedido"].notna() & (sol["pedido"] != ""),
-    (sol["fecha_pedido"] - sol["fecha_lib"]).dt.days,
-    np.nan
-)
-
-def estatus_comprador(row):
-    if pd.notna(row["dias_atencion"]):
-        return f"✅ ATENDIDO ({int(row['dias_atencion'])} días)"
-    if row["dias_desde_lib"] <= 20:
-        return f"🟢 {row['dias_desde_lib']}"
-    if row["dias_desde_lib"] <= 30:
-        return f"🟡 {row['dias_desde_lib']}"
-    return f"🔴 {row['dias_desde_lib']}"
-
-sol["estatus"] = sol.apply(estatus_comprador, axis=1)
+dfp = dfp.sort_values(by=["tiene_mr", "dias_demora"], ascending=[True, False])
 
 st.dataframe(
-    sol[
+    dfp[
         [
-            "solped",
-            "grupo_compras",
-            "fecha_lib",
             "pedido",
+            "proveedor",
+            "material",
+            "descripcion",
+            "grupo",
+            "centro",
             "fecha_pedido",
-            "estatus"
+            "fecha_entrega",
+            "cantidad_pedida",
+            "cantidad_entregada",
+            "pendiente_pedido",
+            "estatus",
         ]
     ],
     use_container_width=True
 )
+``
