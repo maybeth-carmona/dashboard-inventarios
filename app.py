@@ -30,7 +30,7 @@ st.sidebar.subheader("🔍 Filtros")
 # =====================================================
 # 🚚 SEGUIMIENTO A PROVEEDORES
 # =====================================================
-st.header("🚚 Seguimiento a Proveedores")
+st.header("🚚 Top 10 proveedores que ponen en riesgo los niveles de inventario")
 
 ped = ped.rename(columns={
     "Pedido de Compras": "pedido",
