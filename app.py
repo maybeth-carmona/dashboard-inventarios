@@ -42,10 +42,10 @@ ped = ped.rename(columns={
     "Fecha Creación Pedido": "fecha_pedido",
     "Fecha de Entrega": "fecha_entrega",
     "Cantidad Entregada": "cantidad_entregada",
-    "Indicador Entrega Final": "entrega_final",  # Q1
+    "Indicador Entrega Final": "entrega_final"  # Q1
 })
 
-# -------- Normalización básica --------
+# Normalización
 ped["pedido"] = ped["pedido"].astype(str)
 ped["entrega_final"] = ped["entrega_final"].astype(str).str.upper()
 
@@ -57,7 +57,7 @@ ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.da
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-# Cantidades (POR PARTIDA, sin sumar)
+# Cantidades (por partida)
 ped["cantidad_entregada"] = pd.to_numeric(
     ped["cantidad_entregada"], errors="coerce"
 ).fillna(0)
@@ -70,13 +70,18 @@ ped["cantidad_pedida"] = pd.to_numeric(
     ped[col_cant], errors="coerce"
 ).fillna(0)
 
+# ✅ CORRECCIÓN CLAVE:
+# La cantidad entregada visible NO puede ser mayor que la pedida
+ped["cantidad_entregada_visible"] = ped[
+    ["cantidad_entregada", "cantidad_pedida"]
+].min(axis=1)
+
 # =====================================================
-# CÁLCULO DE DEMORA Y ESTATUS
+# DEMORA Y ESTATUS
 # =====================================================
 ped["dias_demora"] = (
     HOY - pd.to_datetime(ped["fecha_entrega"])
 ).dt.days.fillna(0)
-
 ped.loc[ped["dias_demora"] < 0, "dias_demora"] = 0
 
 def estatus_proveedor(row):
@@ -92,7 +97,7 @@ def estatus_proveedor(row):
 ped["estatus"] = ped.apply(estatus_proveedor, axis=1)
 
 # =====================================================
-# FILTROS LATERALES
+# FILTROS
 # =====================================================
 ped["proveedor"] = ped["proveedor"].astype(str)
 ped["grupo"] = ped["grupo"].astype(str)
@@ -111,7 +116,7 @@ if f_cen:
     dfp = dfp[dfp["centro"].isin(f_cen)]
 
 # =====================================================
-# KPIs (por pedido, usando Q1)
+# KPIs
 # =====================================================
 kpi_pend = dfp[dfp["entrega_final"] != "X"]["pedido"].nunique()
 kpi_dem = dfp[(dfp["entrega_final"] != "X") & (dfp["dias_demora"] > 0)]["pedido"].nunique()
@@ -121,7 +126,7 @@ c1.metric("📦 Pedidos SIN Entrega Final", kpi_pend)
 c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
-# 📊 GRÁFICA – SOLO PENDIENTES
+# 📊 GRÁFICA (VERDE CORPORATIVO)
 # =====================================================
 top10 = (
     dfp[dfp["entrega_final"] != "X"]
@@ -136,12 +141,12 @@ fig = px.bar(
     x="proveedor",
     y="promedio",
     title="📊 Proveedores con pedidos pendientes",
-    color_discrete_sequence=["#69A341"]  # verde corporativo
+    color_discrete_sequence=["#69A341"]
 )
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 TABLA FINAL – ORDENADA COMO PEDISTE
+# 📋 TABLA FINAL – ORDEN CORRECTO
 # =====================================================
 dfp = dfp.sort_values(
     by=["entrega_final", "dias_demora"],
@@ -160,7 +165,7 @@ st.dataframe(
             "fecha_pedido",
             "fecha_entrega",
             "cantidad_pedida",
-            "cantidad_entregada",
+            "cantidad_entregada_visible",
             "estatus",
         ]
     ],
