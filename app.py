@@ -30,7 +30,7 @@ st.sidebar.subheader("🔍 Filtros")
 # =====================================================
 # 🚚 SEGUIMIENTO A PROVEEDORES
 # =====================================================
-st.header("🚚 Top 10 proveedores que ponen en riesgo los niveles de inventario")
+st.header("🚚 Seguimiento a Proveedores")
 
 ped = ped.rename(columns={
     "Pedido de Compras": "pedido",
@@ -41,9 +41,9 @@ ped = ped.rename(columns={
     "Centro": "centro",
     "Fecha Creación Pedido": "fecha_pedido",
     "Fecha de Entrega": "fecha_entrega",
-    "Cantidad de Mat en U": "cantidad_pedida",          # ✅ CORRECTA
-    "Cantidad Entregada": "cantidad_entregada",         # ✅ CORRECTA
-    "Indicador Entrega Final": "entrega_final"          # Q1
+    "Cantidad de Mat en U": "cantidad_pedida",        # ✅ cantidad pedida real
+    "Cantidad Entregada": "cantidad_entregada",       # ✅ cantidad entregada real
+    "Indicador Entrega Final": "entrega_final"        # ✅ Q1 SAP
 })
 
 # -----------------------------------------------------
@@ -55,26 +55,27 @@ ped["entrega_final"] = ped["entrega_final"].astype(str).str.upper()
 # Quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# Fechas SIN hora
+# Fechas sin hora
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-# Cantidades POR PARTIDA (limpias)
+# Cantidades POR PARTIDA
 ped["cantidad_pedida"] = pd.to_numeric(ped["cantidad_pedida"], errors="coerce").fillna(0)
 ped["cantidad_entregada"] = pd.to_numeric(ped["cantidad_entregada"], errors="coerce").fillna(0)
 
-# ✅ Protección visual: nunca mostrar más entregado que pedido
+# ✅ Nunca mostrar entregada mayor que pedida
 ped["cantidad_entregada_visible"] = ped[
     ["cantidad_entregada", "cantidad_pedida"]
 ].min(axis=1)
 
 # =====================================================
-# DEMORA Y ESTATUS (SAP MANDA)
+# DEMORA Y ESTATUS
 # =====================================================
 ped["dias_demora"] = (
     HOY - pd.to_datetime(ped["fecha_entrega"])
 ).dt.days.fillna(0)
+
 ped.loc[ped["dias_demora"] < 0, "dias_demora"] = 0
 
 def estatus_proveedor(row):
@@ -111,14 +112,16 @@ if f_cen:
 # KPIs
 # =====================================================
 kpi_pend = dfp[dfp["entrega_final"] != "X"]["pedido"].nunique()
-kpi_dem = dfp[(dfp["entrega_final"] != "X") & (dfp["dias_demora"] > 0)]["pedido"].nunique()
+kpi_dem = dfp[
+    (dfp["entrega_final"] != "X") & (dfp["dias_demora"] > 0)
+]["pedido"].nunique()
 
 c1, c2 = st.columns(2)
 c1.metric("📦 Pedidos SIN Entrega Final", kpi_pend)
 c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
-# 📊 GRÁFICA – VERDE CORPORATIVO
+# 📊 GRÁFICA – TÍTULO ACTUALIZADO ✅
 # =====================================================
 top10 = (
     dfp[dfp["entrega_final"] != "X"]
@@ -132,9 +135,10 @@ fig = px.bar(
     top10,
     x="proveedor",
     y="promedio",
-    title="📊 Proveedores con pedidos pendientes",
-    color_discrete_sequence=["#69A341"]
+    title="📊 Top 10 proveedores que ponen en riesgo los niveles de inventario",
+    color_discrete_sequence=["#69A341"]  # verde corporativo
 )
+
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
@@ -142,7 +146,9 @@ st.plotly_chart(fig, use_container_width=True)
 # Pendientes arriba, más demorados primero,
 # entregados hasta abajo
 # =====================================================
-dfp["orden_entrega"] = dfp["entrega_final"].apply(lambda x: 1 if x == "X" else 0)
+dfp["orden_entrega"] = dfp["entrega_final"].apply(
+    lambda x: 1 if x == "X" else 0
+)
 
 dfp = dfp.sort_values(
     by=["orden_entrega", "dias_demora"],
@@ -150,23 +156,4 @@ dfp = dfp.sort_values(
 )
 
 # =====================================================
-# 📋 TABLA FINAL DEFINITIVA
-# =====================================================
-st.dataframe(
-    dfp[
-        [
-            "pedido",
-            "proveedor",
-            "material",
-            "descripcion",
-            "grupo",
-            "centro",
-            "fecha_pedido",
-            "fecha_entrega",
-            "cantidad_pedida",
-            "cantidad_entregada_visible",
-            "estatus",
-        ]
-    ],
-    use_container_width=True
-)
+# 📋 TABLA FINAL
