@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,10 +5,34 @@ import plotly.express as px
 from datetime import datetime
 
 # =====================================================
-# 🚚 SEGUIMIENTO A PROVEEDORES (CORRECTO)
+# CONFIGURACIÓN GENERAL
+# =====================================================
+st.set_page_config(page_title="Dashboard Compras", layout="wide")
+st.title("📊 Dashboard Operativo de Compras")
+
+HOY = pd.to_datetime(datetime.today().date())
+
+# =====================================================
+# 📂 CARGA DE ARCHIVOS
+# =====================================================
+st.sidebar.header("📂 Archivos SAP")
+
+file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
+file_sol = st.sidebar.file_uploader("Solicitudes de Pedido (Solped)", type=["xlsx"])
+
+if file_ped is None or file_sol is None:
+    st.info("⬅️ Carga ambos archivos para iniciar")
+    st.stop()
+
+ped = pd.read_excel(file_ped)
+sol = pd.read_excel(file_sol)
+
+# =====================================================
+# 🚚 SEGUIMIENTO A PROVEEDORES (FOCO PRINCIPAL)
 # =====================================================
 st.header("🚚 Seguimiento a Proveedores")
 
+# ---------- Normalización mínima ----------
 ped = ped.rename(columns={
     "Pedido de Compras": "pedido",
     "Proveedor TEXT": "proveedor",
@@ -24,80 +47,82 @@ ped = ped.rename(columns={
 
 ped["pedido"] = ped["pedido"].astype(str)
 
-# ❌ eliminar convenios
+# Quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# fechas SIN hora
+# Fechas SIN hora
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 
-# cantidades
+# Cantidades
 ped["cantidad_entregada"] = pd.to_numeric(
     ped["cantidad_entregada"], errors="coerce"
 ).fillna(0)
 
+# Selección manual de cantidad solicitada (SAP varía)
 st.sidebar.subheader("📦 Cantidad solicitada (Pedidos)")
 col_cant = st.sidebar.selectbox(
     "Columna de cantidad pedida",
-    ped.columns.tolist()
+    options=ped.columns.tolist()
 )
+
 ped["cantidad_pedida"] = pd.to_numeric(
     ped[col_cant], errors="coerce"
 ).fillna(0)
 
-# ===== AGREGACIÓN POR PEDIDO =====
-resumen_pedido = (
+# =====================================================
+# 🔑 AGREGACIÓN CORRECTA POR PEDIDO (CLAVE)
+# =====================================================
+resumen = (
     ped.groupby("pedido", as_index=False)
     .agg(
         proveedor=("proveedor", "first"),
         grupo=("grupo", "first"),
         centro=("centro", "first"),
         fecha_entrega=("fecha_entrega", "first"),
-        cant_pedida=("cantidad_pedida", "sum"),
-        cant_entregada=("cantidad_entregada", "sum")
+        pedida_total=("cantidad_pedida", "sum"),
+        entregada_total=("cantidad_entregada", "sum")
     )
 )
 
-resumen_pedido["pendiente_pedido"] = (
-    resumen_pedido["cant_pedida"]
-    - resumen_pedido["cant_entregada"]
+# Cantidad pendiente correcta
+resumen["pendiente_pedido"] = (
+    resumen["pedida_total"] - resumen["entregada_total"]
 ).clip(lower=0)
 
-resumen_pedido["dias_demora"] = (
-    (HOY - pd.to_datetime(resumen_pedido["fecha_entrega"]))
+# SOLO pedidos con pendiente (esto es CLAVE)
+resumen = resumen[resumen["pendiente_pedido"] > 0].copy()
+
+# Días de demora contra FECHA COMPROMISO
+resumen["dias_demora"] = (
+    (HOY - pd.to_datetime(resumen["fecha_entrega"]))
     .dt.days
-    .fillna(0)
-    .clip(lower=0)
-    .astype("Int64")
 )
+resumen["dias_demora"] = resumen["dias_demora"].fillna(0)
+resumen.loc[resumen["dias_demora"] < 0, "dias_demora"] = 0
 
-# 👉 SOLO PENDIENTES
-resumen_pedido = resumen_pedido[
-    resumen_pedido["pendiente_pedido"] > 0
-].copy()
-
-# regresar al detalle
+# Reinyectar al detalle (solo pendientes)
 ped = ped.merge(
-    resumen_pedido[
-        ["pedido", "pendiente_pedido", "dias_demora"]
-    ],
+    resumen[["pedido", "pendiente_pedido", "dias_demora"]],
     on="pedido",
-    how="inner"   # 👈 esto elimina ENTREGADOS
+    how="inner"   # 🔥 elimina ENTREGADOS
 )
 
-def semaforo_prov(row):
-    d = row["dias_demora"]
+# Semáforo (el que ya te gustaba)
+def semaforo_proveedor(d):
     if d > 60:
-        return f"🔴 {d}"
+        return f"🔴 {int(d)}"
     if d > 30:
-        return f"🟡 {d}"
-    return f"🟢 {d}"
+        return f"🟡 {int(d)}"
+    return f"🟢 {int(d)}"
 
-ped["estatus"] = ped.apply(semaforo_prov, axis=1)
+ped["estatus"] = ped["dias_demora"].apply(semaforo_proveedor)
 
-# ===== FILTROS =====
+# =====================================================
+# 🔍 FILTROS PROVEEDORES
+# =====================================================
 st.subheader("🔍 Filtros Proveedores")
 
 ped["proveedor"] = ped["proveedor"].astype(str)
@@ -116,7 +141,9 @@ if f_grp:
 if f_cen:
     dfp = dfp[dfp["centro"].isin(f_cen)]
 
-# ===== KPIs (SOLO PENDIENTES) =====
+# =====================================================
+# KPIs (SOLO PENDIENTES)
+# =====================================================
 kpi_pend = dfp["pedido"].nunique()
 kpi_dem = dfp[dfp["dias_demora"] > 0]["pedido"].nunique()
 
@@ -124,7 +151,9 @@ c1, c2 = st.columns(2)
 c1.metric("📦 Pedidos con pendiente", kpi_pend)
 c2.metric("⏰ Pedidos con demora", kpi_dem)
 
-# ===== GRÁFICA (RESPONDE A FILTROS) =====
+# =====================================================
+# 📊 GRÁFICA TOP PROVEEDORES (RESPONDE A FILTROS)
+# =====================================================
 top10 = (
     dfp.groupby("proveedor", as_index=False)
     .agg(promedio=("dias_demora", "mean"))
@@ -137,12 +166,13 @@ fig1 = px.bar(
     x="proveedor",
     y="promedio",
     title="📊 Top proveedores que ponen en riesgo el inventario",
-    color_discrete_sequence=["#0096A9"]  # azul relajado
+    color_discrete_sequence=["#0096A9"]  # azul corporativo relajado
 )
-
 st.plotly_chart(fig1, use_container_width=True)
 
-# ===== TABLA FINAL =====
+# =====================================================
+# 📋 TABLA FINAL (SOLO PENDIENTES, ORDENADA)
+# =====================================================
 dfp = dfp.sort_values("dias_demora", ascending=False)
 
 st.dataframe(
@@ -164,3 +194,10 @@ st.dataframe(
     ],
     use_container_width=True
 )
+
+# =====================================================
+# 🧑‍💼 SEGUIMIENTO A COMPRADORES
+# (NO TOCADO DE MOMENTO, SOLO ESTABLE)
+# =====================================================
+st.header("🧑‍💼 Seguimiento a Compradores")
+st.info("ℹ️ Esta sección se ajusta después de validar proveedores.")
