@@ -41,14 +41,12 @@ ped = ped.rename(columns={
     "Centro": "centro",
     "Fecha Creación Pedido": "fecha_pedido",
     "Fecha de Entrega": "fecha_entrega",
-    "Cantidad de Mat en U": "cantidad_pedida",        # ✅ cantidad pedida real
-    "Cantidad Entregada": "cantidad_entregada",       # ✅ cantidad entregada real
-    "Indicador Entrega Final": "entrega_final"        # ✅ Q1 SAP
+    "Cantidad de Mat en U": "cantidad_pedida",
+    "Cantidad Entregada": "cantidad_entregada",
+    "Indicador Entrega Final": "entrega_final"
 })
 
-# -----------------------------------------------------
 # Normalización
-# -----------------------------------------------------
 ped["pedido"] = ped["pedido"].astype(str)
 ped["entrega_final"] = ped["entrega_final"].astype(str).str.upper()
 
@@ -60,11 +58,11 @@ ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.da
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-# Cantidades POR PARTIDA
+# Cantidades por partida (limpias)
 ped["cantidad_pedida"] = pd.to_numeric(ped["cantidad_pedida"], errors="coerce").fillna(0)
 ped["cantidad_entregada"] = pd.to_numeric(ped["cantidad_entregada"], errors="coerce").fillna(0)
 
-# ✅ Nunca mostrar entregada mayor que pedida
+# Nunca mostrar entregada mayor que pedida
 ped["cantidad_entregada_visible"] = ped[
     ["cantidad_entregada", "cantidad_pedida"]
 ].min(axis=1)
@@ -75,7 +73,6 @@ ped["cantidad_entregada_visible"] = ped[
 ped["dias_demora"] = (
     HOY - pd.to_datetime(ped["fecha_entrega"])
 ).dt.days.fillna(0)
-
 ped.loc[ped["dias_demora"] < 0, "dias_demora"] = 0
 
 def estatus_proveedor(row):
@@ -121,7 +118,7 @@ c1.metric("📦 Pedidos SIN Entrega Final", kpi_pend)
 c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
-# 📊 GRÁFICA – TÍTULO ACTUALIZADO ✅
+# 📊 GRÁFICA
 # =====================================================
 top10 = (
     dfp[dfp["entrega_final"] != "X"]
@@ -136,24 +133,38 @@ fig = px.bar(
     x="proveedor",
     y="promedio",
     title="📊 Top 10 proveedores que ponen en riesgo los niveles de inventario",
-    color_discrete_sequence=["#69A341"]  # verde corporativo
+    color_discrete_sequence=["#69A341"]
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 ORDEN FINAL
-# Pendientes arriba, más demorados primero,
-# entregados hasta abajo
+# 📋 TABLA FINAL — AQUÍ ESTÁ ✅
 # =====================================================
-dfp["orden_entrega"] = dfp["entrega_final"].apply(
-    lambda x: 1 if x == "X" else 0
-)
+st.subheader("📋 Detalle por partida")
+
+dfp["orden_entrega"] = dfp["entrega_final"].apply(lambda x: 1 if x == "X" else 0)
 
 dfp = dfp.sort_values(
     by=["orden_entrega", "dias_demora"],
     ascending=[True, False]
 )
 
-# =====================================================
-# 📋 TABLA FINAL
+st.dataframe(
+    dfp[
+        [
+            "pedido",
+            "proveedor",
+            "material",
+            "descripcion",
+            "grupo",
+            "centro",
+            "fecha_pedido",
+            "fecha_entrega",
+            "cantidad_pedida",
+            "cantidad_entregada_visible",
+            "estatus",
+        ]
+    ],
+    use_container_width=True
+)
