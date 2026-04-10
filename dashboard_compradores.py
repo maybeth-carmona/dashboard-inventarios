@@ -8,25 +8,25 @@ from datetime import datetime
 # CONFIG GENERAL
 # =====================================================
 st.set_page_config(page_title="Dashboard Compradores", layout="wide")
-st.title("🧑‍💼 Seguimiento a Compradores – Atención de Solicitudes")
+st.title("Seguimiento a Compradores – Atención de Solicitudes")
 
 HOY = pd.to_datetime(datetime.today().date())
 
 # =====================================================
 # CARGA ARCHIVO
 # =====================================================
-st.sidebar.header("📂 Archivo SAP")
+st.sidebar.header("Archivo SAP")
 
 file_sol = st.sidebar.file_uploader("Solicitudes de Pedido (Solped)", type=["xlsx"])
 
 if file_sol is None:
-    st.info("⬅️ Carga el archivo de Solped")
+    st.info("Carga el archivo de Solped")
     st.stop()
 
 sol = pd.read_excel(file_sol)
 
 # =====================================================
-# NORMALIZACIÓN ROBUSTA DE COLUMNAS
+# RENOMBRE EXACTO DE COLUMNAS SAP
 # =====================================================
 rename_map = {
     "Número de Solped": "solped",
@@ -34,28 +34,30 @@ rename_map = {
     "Fecha Creación Pedido": "fecha_pedido",
     "Pedido de Compras": "pedido",
     "Grupo de compras": "grupo_compras",
-    "Usuario Creador": "usuario",
     "Grupo artículos": "grupo_articulos",
+    "Centro": "centro",
     "Material": "material",
     "Texto Material": "material_desc",
-    "Centro": "centro",
     "Imputación": "imputacion",
-    "Ind. Liberacion en Estrategia": "ind_liberacion"
+    "Usuario creador": "usuario",                     # R1
+    "Ind. Liberacion en Estrategia": "ind_liberacion" # M1
 }
 
-for original, new in rename_map.items():
-    if original in sol.columns:
-        sol = sol.rename(columns={original: new})
+for col_origen, col_destino in rename_map.items():
+    if col_origen in sol.columns:
+        sol = sol.rename(columns={col_origen: col_destino})
 
-# Asegurar columnas aunque no existan
-columnas_necesarias = [
+# =====================================================
+# ASEGURAR COLUMNAS CLAVE
+# =====================================================
+columnas = [
     "solped", "fecha_lib", "fecha_pedido", "pedido",
-    "grupo_compras", "usuario", "grupo_articulos",
-    "material", "material_desc", "centro",
-    "imputacion", "ind_liberacion"
+    "grupo_compras", "grupo_articulos", "centro",
+    "material", "material_desc", "imputacion",
+    "usuario", "ind_liberacion"
 ]
 
-for c in columnas_necesarias:
+for c in columnas:
     if c not in sol.columns:
         sol[c] = np.nan
 
@@ -69,9 +71,10 @@ sol["fecha_lib"] = pd.to_datetime(sol["fecha_lib"], errors="coerce")
 sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
 
 sol["ind_liberacion"] = sol["ind_liberacion"].astype(str).str.upper()
+sol["usuario"] = sol["usuario"].astype(str)
 
 # =====================================================
-# CÁLCULOS
+# CÁLCULO DE DÍAS
 # =====================================================
 sol["dias_desde_lib"] = (HOY - sol["fecha_lib"]).dt.days
 sol["dias_desde_lib"] = sol["dias_desde_lib"].fillna(0).astype(int)
@@ -83,33 +86,33 @@ sol["dias_atencion"] = np.where(
 )
 
 # =====================================================
-# ESTATUS (SEMÁFORO CON EMOJIS CORRECTOS)
+# ESTATUS – SEMÁFORO CON EMOJIS
 # =====================================================
 def estatus_solped(row):
     if pd.notna(row["dias_atencion"]):
-        return f"✅ ATENDIDA ({int(row['dias_atencion'])} días)"
+        return f"✅ ATENDIDA ({int(row['dias_atencion'])})"
 
     d = row["dias_desde_lib"]
     if d > 100:
-        return f"🔴 ROJO CRÍTICO ({d})"
+        return f"🔴 {d}"
     if d > 60:
-        return f"🔴 ROJO ({d})"
+        return f"🔴 {d}"
     if d > 20:
-        return f"🟡 AMARILLO ({d})"
-    return f"🟢 VERDE ({d})"
+        return f"🟡 {d}"
+    return f"🟢 {d}"
 
 sol["estatus"] = sol.apply(estatus_solped, axis=1)
 
 # =====================================================
 # FILTROS
 # =====================================================
-st.sidebar.subheader("🔍 Filtros")
+st.sidebar.subheader("Filtros")
 
 for c in ["grupo_compras", "usuario", "grupo_articulos", "centro", "ind_liberacion"]:
     sol[c] = sol[c].astype(str)
 
 f_gc = st.sidebar.multiselect("Grupo de Compras", sorted(sol["grupo_compras"].dropna().unique()))
-f_usr = st.sidebar.multiselect("Usuario Creador", sorted(sol["usuario"].dropna().unique()))
+f_usr = st.sidebar.multiselect("Usuario creador", sorted(sol["usuario"].dropna().unique()))
 f_ga = st.sidebar.multiselect("Grupo de Artículos", sorted(sol["grupo_articulos"].dropna().unique()))
 f_ct = st.sidebar.multiselect("Centro", sorted(sol["centro"].dropna().unique()))
 f_il = st.sidebar.multiselect("Ind. Liberación", sorted(sol["ind_liberacion"].dropna().unique()))
@@ -127,9 +130,9 @@ if f_il:
     df = df[df["ind_liberacion"].isin(f_il)]
 
 # =====================================================
-# 📊 GRÁFICA – DESEMPEÑO POR GRUPO DE COMPRAS
+# GRÁFICA – DESEMPEÑO POR GRUPO DE COMPRAS
 # =====================================================
-st.subheader("📊 Desempeño por Grupo de Compras")
+st.subheader("Desempeño por Grupo de Compras")
 
 graf = (
     df[pd.notna(df["dias_atencion"])]
@@ -149,9 +152,9 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 TABLA FINAL – ANÁLISIS DE ATENCIÓN
+# TABLA FINAL – ANÁLISIS DE ATENCIÓN
 # =====================================================
-st.subheader("📋 Análisis de Atención a Solicitudes")
+st.subheader("Análisis de Atención a Solicitudes")
 
 df["orden_atendida"] = df["dias_atencion"].apply(lambda x: 1 if pd.notna(x) else 0)
 
