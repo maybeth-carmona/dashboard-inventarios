@@ -8,19 +8,19 @@ from datetime import datetime
 # CONFIG GENERAL
 # =====================================================
 st.set_page_config(page_title="Dashboard Compradores", layout="wide")
-st.title("🧑‍💼 Seguimiento a Compradores – Atención de Solicitudes")
+st.title("Seguimiento a Compradores – Atención de Solicitudes")
 
 HOY = pd.to_datetime(datetime.today().date())
 
 # =====================================================
 # CARGA ARCHIVO
 # =====================================================
-st.sidebar.header("📂 Archivo SAP")
+st.sidebar.header("Archivo SAP")
 
 file_sol = st.sidebar.file_uploader("Solicitudes de Pedido (Solped)", type=["xlsx"])
 
 if file_sol is None:
-    st.info("⬅️ Carga el archivo de Solped")
+    st.info("Carga el archivo de Solped")
     st.stop()
 
 sol = pd.read_excel(file_sol)
@@ -34,7 +34,7 @@ rename_map = {
     "Fecha Creación Pedido": "fecha_pedido",
     "Pedido de Compras": "pedido",
     "Grupo de compras": "grupo_compras",
-    "Usuario Creador": "usuario",                 # R1
+    "Usuario Creador": "usuario",
     "Grupo artículos": "grupo_articulos",
     "Material": "material",
     "Texto Material": "material_desc",
@@ -43,11 +43,10 @@ rename_map = {
     "Ind. Liberacion en Estrategia": "ind_liberacion"
 }
 
-for c_origen, c_dest in rename_map.items():
-    if c_origen in sol.columns:
-        sol = sol.rename(columns={c_origen: c_dest})
+for original, new in rename_map.items():
+    if original in sol.columns:
+        sol = sol.rename(columns={original: new})
 
-# Crear columnas si no existen (para evitar KeyError)
 columnas_necesarias = [
     "solped", "fecha_lib", "fecha_pedido", "pedido",
     "grupo_compras", "usuario", "grupo_articulos",
@@ -60,7 +59,7 @@ for c in columnas_necesarias:
         sol[c] = np.nan
 
 # =====================================================
-# LIMPIEZA
+# LIMPIEZA DE DATOS
 # =====================================================
 sol["solped"] = sol["solped"].astype(str)
 sol["pedido"] = sol["pedido"].astype(str).str.replace(".0", "", regex=False)
@@ -71,7 +70,7 @@ sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
 sol["ind_liberacion"] = sol["ind_liberacion"].astype(str).str.upper()
 
 # =====================================================
-# CÁLCULOS
+# CÁLCULOS DE DÍAS
 # =====================================================
 sol["dias_desde_lib"] = (HOY - sol["fecha_lib"]).dt.days
 sol["dias_desde_lib"] = sol["dias_desde_lib"].fillna(0).astype(int)
@@ -83,16 +82,15 @@ sol["dias_atencion"] = np.where(
 )
 
 # =====================================================
-# ESTATUS CON SEMÁFORO PROFESIONAL
+# ESTATUS (SEMÁFORO PROFESIONAL)
 # =====================================================
 def estatus_solped(row):
     if pd.notna(row["dias_atencion"]):
         return f"ATENDIDA ({int(row['dias_atencion'])} días)"
 
     d = row["dias_desde_lib"]
-
     if d > 100:
-        return f"ROJO CRÍTICO ({d})"
+        return f"ROJO CRITICO ({d})"
     if d > 60:
         return f"ROJO ({d})"
     if d > 20:
@@ -102,9 +100,9 @@ def estatus_solped(row):
 sol["estatus"] = sol.apply(estatus_solped, axis=1)
 
 # =====================================================
-# FILTROS (BARRA LATERAL)
+# FILTROS
 # =====================================================
-st.sidebar.subheader("🔍 Filtros")
+st.sidebar.subheader("Filtros")
 
 for c in ["grupo_compras", "usuario", "grupo_articulos", "centro", "ind_liberacion"]:
     sol[c] = sol[c].astype(str)
@@ -128,9 +126,9 @@ if f_il:
     df = df[df["ind_liberacion"].isin(f_il)]
 
 # =====================================================
-# 📊 GRÁFICA – DESEMPEÑO POR GRUPO DE COMPRAS
+# GRÁFICA DE DESEMPEÑO
 # =====================================================
-st.subheader("📊 Desempeño por Grupo de Compras")
+st.subheader("Desempeño por Grupo de Compras")
 
 graf = (
     df[pd.notna(df["dias_atencion"])]
@@ -150,11 +148,10 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 TABLA – ANÁLISIS DE ATENCIÓN
+# TABLA DE ANÁLISIS
 # =====================================================
-st.subheader("📋 Análisis de Atención a Solicitudes")
+st.subheader("Análisis de Atención a Solicitudes")
 
-# No atendidas arriba, más días primero
 df["orden_atendida"] = df["dias_atencion"].apply(lambda x: 1 if pd.notna(x) else 0)
 
 df = df.sort_values(
@@ -182,4 +179,3 @@ st.dataframe(
     ],
     use_container_width=True
 )
-``
