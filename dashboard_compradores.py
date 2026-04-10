@@ -1,12 +1,14 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+import plotly.express as px
 from datetime import datetime
 
 # =====================================================
 # CONFIG GENERAL
 # =====================================================
 st.set_page_config(page_title="Dashboard Compradores", layout="wide")
-st.title("🧑‍💼 Seguimiento a Compradores – Solped")
+st.title("🧑‍💼 Seguimiento a Compradores – Atención de Solped")
 
 HOY = pd.to_datetime(datetime.today().date())
 
@@ -28,57 +30,104 @@ sol = pd.read_excel(file_sol)
 # =====================================================
 sol = sol.rename(columns={
     "Número de Solped": "solped",
-    "Grupo de compras": "grupo_compras",
     "Fecha Liberación Solped": "fecha_lib",
-    "Fecha Creación Pedido": "fecha_pedido"
+    "Fecha Creación Pedido": "fecha_pedido",
+    "Pedido de Compras": "pedido",
+    "Grupo de compras": "grupo_compras",
+    "Usuario Creador": "usuario",
+    "Grupo artículos": "grupo_articulos",
+    "Material": "material",
+    "Texto Material": "material_desc",
+    "Centro": "centro"
 })
 
 sol["solped"] = sol["solped"].astype(str)
+sol["pedido"] = sol["pedido"].astype(str).str.replace(".0", "", regex=False)
+
 sol["fecha_lib"] = pd.to_datetime(sol["fecha_lib"], errors="coerce")
 sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
 
 # =====================================================
-# CÁLCULOS
+# CÁLCULOS PRINCIPALES
 # =====================================================
 sol["dias_desde_lib"] = (HOY - sol["fecha_lib"]).dt.days
 
-sol["dias_atencion"] = (
-    sol["fecha_pedido"] - sol["fecha_lib"]
-).dt.days
+# días de atención solo si hay pedido
+sol["dias_atencion"] = np.where(
+    sol["pedido"].notna() & (sol["pedido"] != "") & (sol["pedido"] != "nan"),
+    (sol["fecha_pedido"] - sol["fecha_lib"]).dt.days,
+    np.nan
+)
 
-def estatus_comprador(row):
+def estatus_solped(row):
     if pd.notna(row["dias_atencion"]):
-        return f"✅ ATENDIDO ({int(row['dias_atencion'])} días)"
-    if row["dias_desde_lib"] <= 20:
-        return f"🟢 {row['dias_desde_lib']}"
-    if row["dias_desde_lib"] <= 30:
-        return f"🟡 {row['dias_desde_lib']}"
-    return f"🔴 {row['dias_desde_lib']}"
+        return "✅ ATENDIDA"
+    d = int(row["dias_desde_lib"])
+    if d > 100:
+        return f"🔥 {d}"
+    if d > 60:
+        return f"🔴 {d}"
+    if d > 20:
+        return f"🟡 {d}"
+    return f"🟢 {d}"
 
-sol["estatus"] = sol.apply(estatus_comprador, axis=1)
+sol["estatus"] = sol.apply(estatus_solped, axis=1)
 
 # =====================================================
-# FILTROS
+# FILTROS (BARRA LATERAL)
 # =====================================================
 st.sidebar.subheader("🔍 Filtros")
 
-sol["grupo_compras"] = sol["grupo_compras"].astype(str)
-f_grp = st.sidebar.multiselect(
-    "Grupo de Compras",
-    sorted(sol["grupo_compras"].unique())
-)
+for col in ["grupo_compras", "usuario", "grupo_articulos", "centro"]:
+    sol[col] = sol[col].astype(str)
+
+f_gc = st.sidebar.multiselect("Grupo de Compras", sorted(sol["grupo_compras"].unique()))
+f_usr = st.sidebar.multiselect("Usuario Creador", sorted(sol["usuario"].unique()))
+f_ga = st.sidebar.multiselect("Grupo de Artículos", sorted(sol["grupo_articulos"].unique()))
+f_ct = st.sidebar.multiselect("Centro", sorted(sol["centro"].unique()))
 
 df = sol.copy()
-if f_grp:
-    df = df[df["grupo_compras"].isin(f_grp)]
+if f_gc:
+    df = df[df["grupo_compras"].isin(f_gc)]
+if f_usr:
+    df = df[df["usuario"].isin(f_usr)]
+if f_ga:
+    df = df[df["grupo_articulos"].isin(f_ga)]
+if f_ct:
+    df = df[df["centro"].isin(f_ct)]
 
 # =====================================================
-# TABLA FINAL
+# 📊 GRÁFICA – DESEMPEÑO POR GRUPO DE COMPRAS
 # =====================================================
-st.subheader("📋 Detalle de Solicitudes")
+st.subheader("📊 Desempeño por Grupo de Compras")
+
+graf = (
+    df[pd.notna(df["dias_atencion"])]
+    .groupby("grupo_compras", as_index=False)
+    .agg(promedio_dias=("dias_atencion", "mean"))
+)
+
+fig = px.bar(
+    graf,
+    x="grupo_compras",
+    y="promedio_dias",
+    color="promedio_dias",
+    color_continuous_scale=["green", "yellow", "red"],
+    title="Promedio de días para atender Solped"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# =====================================================
+# 📋 TABLA – ANÁLISIS DE ATENCIÓN
+# =====================================================
+st.subheader("📋 Análisis de Atención a Solicitudes")
+
+# Orden: primero no atendidas más demoradas
+df["orden_atendida"] = df["dias_atencion"].apply(lambda x: 1 if pd.notna(x) else 0)
 
 df = df.sort_values(
-    by=["fecha_pedido", "dias_desde_lib"],
+    by=["orden_atendida", "dias_desde_lib"],
     ascending=[True, False]
 )
 
@@ -86,9 +135,16 @@ st.dataframe(
     df[
         [
             "solped",
-            "grupo_compras",
             "fecha_lib",
+            "grupo_compras",
+            "usuario",
+            "grupo_articulos",
+            "material",
+            "material_desc",
+            "centro",
+            "pedido",
             "fecha_pedido",
+            "dias_atencion",
             "estatus"
         ]
     ],
