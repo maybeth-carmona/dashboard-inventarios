@@ -5,10 +5,11 @@ import numpy as np
 from datetime import datetime
 
 # ==============================================
-# CONFIG
+# CONFIGURACIÓN GENERAL
 # ==============================================
 st.set_page_config(page_title="Dashboard Compras", layout="wide")
 st.title("📊 Dashboard Operativo de Compras")
+
 hoy = pd.to_datetime(datetime.today().date())
 
 # ==============================================
@@ -20,6 +21,7 @@ file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
 file_sol = st.sidebar.file_uploader("Solpeds", type=["xlsx"])
 
 if not file_ped or not file_sol:
+    st.warning("Sube ambos archivos para continuar")
     st.stop()
 
 ped = pd.read_excel(file_ped)
@@ -44,25 +46,32 @@ ped = ped.rename(columns={
 
 ped['fecha_pedido'] = pd.to_datetime(ped['fecha_pedido'], errors='coerce')
 ped['fecha_entrega'] = pd.to_datetime(ped['fecha_entrega'], errors='coerce')
-ped['cantidad_entregada'] = pd.to_numeric(ped['cantidad_entregada'], errors='coerce').fillna(0)
+ped = ped[ped['fecha_pedido'].notna()].copy()
 
-# Cantidad solicitada (manual, como ya acordamos)
+ped['cantidad_entregada'] = pd.to_numeric(
+    ped['cantidad_entregada'], errors='coerce'
+).fillna(0)
+
+# Selección de cantidad solicitada
 st.sidebar.subheader("Cantidad solicitada (Pedidos)")
 col_cant = st.sidebar.selectbox(
     "Columna de cantidad pedida",
     ped.columns.tolist()
 )
-ped['cantidad_pedida'] = pd.to_numeric(ped[col_cant], errors='coerce').fillna(0)
+
+ped['cantidad_pedida'] = pd.to_numeric(
+    ped[col_cant], errors='coerce'
+).fillna(0)
 
 # MR real
 ped['entregado'] = ped['cantidad_entregada'] > 0
 
-# Cantidad pendiente
+# Cantidad pendiente real
 ped['cantidad_pendiente'] = (
     ped['cantidad_pedida'] - ped['cantidad_entregada']
 ).clip(lower=0)
 
-# ✅ DEMORA REAL VS FECHA COMPROMISO
+# Días de demora vs fecha compromiso
 ped['dias_demora'] = pd.Series(
     np.where(
         ped['fecha_entrega'].notna(),
@@ -72,7 +81,7 @@ ped['dias_demora'] = pd.Series(
     index=ped.index
 ).clip(lower=0).astype("Int64")
 
-def sem_prov(row):
+def semaforo_prov(row):
     if row['entregado'] and row['cantidad_pendiente'] == 0:
         return "✅ Entregado"
     d = int(row['dias_demora'])
@@ -82,14 +91,20 @@ def sem_prov(row):
         return f"🟡 {d}"
     return f"🟢 {d}"
 
-ped['estatus'] = ped.apply(sem_prov, axis=1)
+ped['estatus'] = ped.apply(semaforo_prov, axis=1)
 
-# ---- Filtros Proveedores
+# Filtros proveedores
 st.subheader("Filtros Proveedores")
 
-f_prov = st.multiselect("Proveedor", sorted(ped['proveedor'].dropna().unique()))
-f_grupo = st.multiselect("Grupo de artículos", sorted(ped['grupo_articulos'].dropna().unique()))
-f_centro = st.multiselect("Centro", sorted(ped['centro'].dropna().unique()))
+f_prov = st.multiselect(
+    "Proveedor", sorted(ped['proveedor'].dropna().unique())
+)
+f_grupo = st.multiselect(
+    "Grupo de artículos", sorted(ped['grupo_articulos'].dropna().unique())
+)
+f_centro = st.multiselect(
+    "Centro", sorted(ped['centro'].dropna().unique())
+)
 
 dfp = ped.copy()
 if f_prov:
@@ -99,13 +114,12 @@ if f_grupo:
 if f_centro:
     dfp = dfp[dfp['centro'].isin(f_centro)]
 
-# KPI
 st.metric(
     "Pedidos con pendiente (sin MR)",
     len(dfp[dfp['cantidad_pendiente'] > 0])
 )
 
-# Gráfica
+# Gráfica proveedores
 top_prov = (
     dfp[dfp['cantidad_pendiente'] > 0]
     .groupby('proveedor', as_index=False)
@@ -114,16 +128,19 @@ top_prov = (
     .head(10)
 )
 
-st.plotly_chart(
-    px.bar(top_prov, x='proveedor', y='dias_promedio',
-           title="Top proveedores con mayor demora"),
-    use_container_width=True
+fig1 = px.bar(
+    top_prov,
+    x='proveedor',
+    y='dias_promedio',
+    title="Top 10 proveedores con mayor demora",
+    labels={'dias_promedio': 'Días de demora'}
 )
+st.plotly_chart(fig1, use_container_width=True)
 
-# Tabla ordenada
 st.subheader("Detalle de pedidos")
+
 dfp_ord = dfp.sort_values(
-    by=['entregado','dias_demora'],
+    by=['entregado', 'dias_demora'],
     ascending=[True, False]
 )
 
@@ -156,7 +173,7 @@ sol['fecha_pedido'] = pd.to_datetime(sol['fecha_pedido'], errors='coerce')
 
 sol['pedido'] = sol['pedido'].fillna("SIN TRATAMIENTO")
 
-# Demora sin atender
+# Días sin atender
 sol['dias_sin_pedido'] = pd.Series(
     np.where(
         sol['pedido'] == "SIN TRATAMIENTO",
@@ -166,7 +183,7 @@ sol['dias_sin_pedido'] = pd.Series(
     index=sol.index
 )
 
-# Tiempo real de atención
+# Días reales de atención
 sol['dias_atencion'] = pd.Series(
     np.where(
         sol['pedido'] != "SIN TRATAMIENTO",
@@ -176,7 +193,7 @@ sol['dias_atencion'] = pd.Series(
     index=sol.index
 )
 
-def sem_comp(d):
+def semaforo_comp(d):
     if pd.isna(d):
         return ""
     d = int(d)
@@ -186,15 +203,15 @@ def sem_comp(d):
         return f"🟡 {d}"
     return f"🟢 {d}"
 
-sol['estatus_demora'] = sol['dias_sin_pedido'].apply(sem_comp)
+sol['estatus_demora'] = sol['dias_sin_pedido'].apply(semaforo_comp)
 
-# Orden compradores
 sol_ord = sol.sort_values(
-    by=['pedido','dias_sin_pedido'],
+    by=['pedido', 'dias_sin_pedido'],
     ascending=[True, False]
 )
 
 st.subheader("Detalle de Solpeds")
+
 st.dataframe(
     sol_ord[[
         'solped','pedido','grupo_compras','centro',
@@ -205,7 +222,7 @@ st.dataframe(
 )
 
 # Gráfica compradores
-st.subheader("📈 Desempeño por grupo de compras")
+st.subheader("Desempeño por grupo de compras")
 
 grp = (
     sol.dropna(subset=['dias_atencion'])
@@ -214,9 +231,12 @@ grp = (
     .sort_values('dias_promedio')
 )
 
-st.plotly_chart(
-    px.bar(grp, x='grupo_compras', y='dias_promedio',
-           title="Promedio de días para crear pedidos por grupo"),
-    use_container_width=True
+fig2 = px.bar(
+    grp,
+    x='grupo_compras',
+    y='dias_promedio',
+    title="Promedio de días para crear pedidos",
+    labels={'dias_promedio':'Días promedio'}
 )
+st.plotly_chart(fig2, use_container_width=True)
 ``
