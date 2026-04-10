@@ -26,9 +26,9 @@ if file_sol is None:
 sol = pd.read_excel(file_sol)
 
 # =====================================================
-# NORMALIZACIÓN DE COLUMNAS
+# NORMALIZACIÓN DE COLUMNAS (ROBUSTA)
 # =====================================================
-sol = sol.rename(columns={
+rename_map = {
     "Número de Solped": "solped",
     "Fecha Liberación Solped": "fecha_lib",
     "Fecha Creación Pedido": "fecha_pedido",
@@ -39,11 +39,28 @@ sol = sol.rename(columns={
     "Material": "material",
     "Texto Material": "material_desc",
     "Centro": "centro"
-})
+}
 
-# -----------------------------------------------------
-# Limpieza básica
-# -----------------------------------------------------
+for col_origen, col_dest in rename_map.items():
+    if col_origen in sol.columns:
+        sol = sol.rename(columns={col_origen: col_dest})
+
+# =====================================================
+# ASEGURAR COLUMNAS CLAVE (SI NO EXISTEN, CREARLAS)
+# =====================================================
+columnas_necesarias = [
+    "solped", "fecha_lib", "fecha_pedido", "pedido",
+    "grupo_compras", "usuario", "grupo_articulos",
+    "material", "material_desc", "centro"
+]
+
+for col in columnas_necesarias:
+    if col not in sol.columns:
+        sol[col] = np.nan
+
+# =====================================================
+# LIMPIEZA BÁSICA
+# =====================================================
 sol["solped"] = sol["solped"].astype(str)
 sol["pedido"] = sol["pedido"].astype(str).str.replace(".0", "", regex=False)
 
@@ -54,11 +71,8 @@ sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
 # CÁLCULOS
 # =====================================================
 sol["dias_desde_lib"] = (HOY - sol["fecha_lib"]).dt.days
-
-# Asegurar que dias_desde_lib nunca sea NaN
 sol["dias_desde_lib"] = sol["dias_desde_lib"].fillna(0).astype(int)
 
-# días de atención solo si hay pedido
 sol["dias_atencion"] = np.where(
     sol["pedido"].notna() & (sol["pedido"] != "") & (sol["pedido"] != "nan"),
     (sol["fecha_pedido"] - sol["fecha_lib"]).dt.days,
@@ -66,14 +80,12 @@ sol["dias_atencion"] = np.where(
 )
 
 # =====================================================
-# ESTATUS CON SEMÁFORO (CORREGIDO)
+# ESTATUS CON SEMÁFORO
 # =====================================================
 def estatus_solped(row):
-    # Ya atendidas
     if pd.notna(row["dias_atencion"]):
         return f"✅ ATENDIDA ({int(row['dias_atencion'])} días)"
 
-    # No atendidas → semáforo por días
     d = row["dias_desde_lib"]
 
     if d > 100:
@@ -87,17 +99,17 @@ def estatus_solped(row):
 sol["estatus"] = sol.apply(estatus_solped, axis=1)
 
 # =====================================================
-# FILTROS (BARRA LATERAL)
+# FILTROS (BARRA LATERAL – SIN KEYERROR)
 # =====================================================
 st.sidebar.subheader("🔍 Filtros")
 
 for col in ["grupo_compras", "usuario", "grupo_articulos", "centro"]:
     sol[col] = sol[col].astype(str)
 
-f_gc = st.sidebar.multiselect("Grupo de Compras", sorted(sol["grupo_compras"].unique()))
-f_usr = st.sidebar.multiselect("Usuario Creador", sorted(sol["usuario"].unique()))
-f_ga = st.sidebar.multiselect("Grupo de Artículos", sorted(sol["grupo_articulos"].unique()))
-f_ct = st.sidebar.multiselect("Centro", sorted(sol["centro"].unique()))
+f_gc = st.sidebar.multiselect("Grupo de Compras", sorted(sol["grupo_compras"].dropna().unique()))
+f_usr = st.sidebar.multiselect("Usuario Creador", sorted(sol["usuario"].dropna().unique()))
+f_ga = st.sidebar.multiselect("Grupo de Artículos", sorted(sol["grupo_articulos"].dropna().unique()))
+f_ct = st.sidebar.multiselect("Centro", sorted(sol["centro"].dropna().unique()))
 
 df = sol.copy()
 if f_gc:
@@ -136,7 +148,6 @@ st.plotly_chart(fig, use_container_width=True)
 # =====================================================
 st.subheader("📋 Análisis de Atención a Solicitudes")
 
-# Orden: no atendidas arriba, más demoradas primero
 df["orden_atendida"] = df["dias_atencion"].apply(lambda x: 1 if pd.notna(x) else 0)
 
 df = df.sort_values(
