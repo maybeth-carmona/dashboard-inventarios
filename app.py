@@ -50,11 +50,20 @@ ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.da
 ped = ped[ped["fecha_pedido"].notna()].copy()
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 
-ped["cantidad_entregada"] = pd.to_numeric(ped["cantidad_entregada"], errors="coerce").fillna(0)
+ped["cantidad_entregada"] = pd.to_numeric(
+    ped["cantidad_entregada"], errors="coerce"
+).fillna(0)
 
-col_cant = st.sidebar.selectbox("📦 Columna cantidad pedida", ped.columns.tolist())
-ped["cantidad_pedida"] = pd.to_numeric(ped[col_cant], errors="coerce").fillna(0)
+st.sidebar.subheader("📦 Cantidad solicitada")
+col_cant = st.sidebar.selectbox(
+    "Columna de cantidad pedida",
+    ped.columns.tolist()
+)
+ped["cantidad_pedida"] = pd.to_numeric(
+    ped[col_cant], errors="coerce"
+).fillna(0)
 
+# ---- Resumen por pedido ----
 resumen = (
     ped.groupby("pedido", as_index=False)
     .agg(
@@ -67,9 +76,12 @@ resumen = (
 
 resumen["pendiente"] = (resumen["pedida_total"] - resumen["entregada_total"]).clip(lower=0)
 resumen["tiene_mr"] = resumen["entregada_total"] > 0
+
 resumen["dias_demora"] = (
     (HOY - pd.to_datetime(resumen["fecha_entrega"]))
-    .dt.days.fillna(0).clip(lower=0)
+    .dt.days
+    .fillna(0)
+    .clip(lower=0)
 )
 
 ped = ped.merge(
@@ -89,10 +101,12 @@ def estatus_proveedor(row):
 
 ped["estatus"] = ped.apply(estatus_proveedor, axis=1)
 
-dfp = ped[~ped["tiene_mr"]].copy()
+dfp = ped.copy()
 
+# ---- Gráfica proveedores ----
 top10 = (
-    dfp.groupby("proveedor", as_index=False)
+    dfp[~dfp["tiene_mr"]]
+    .groupby("proveedor", as_index=False)
     .agg(promedio=("dias_demora", "mean"))
     .sort_values("promedio", ascending=False)
     .head(10)
@@ -103,35 +117,48 @@ fig1 = px.bar(
     x="proveedor",
     y="promedio",
     title="📊 Proveedores con pedidos pendientes",
-    color_discrete_sequence=["#BABD13"]
+    color_discrete_sequence=["#BABD13"]  # RGB(186,187,19)
 )
 st.plotly_chart(fig1, use_container_width=True)
 
+st.dataframe(dfp, use_container_width=True)
+
 # =====================================================
-# 🧑‍💼 SEGUIMIENTO A COMPRADORES (BIEN HECHO)
+# 🧑‍💼 SEGUIMIENTO A COMPRADORES (ROBUSTO)
 # =====================================================
 st.header("🧑‍💼 Seguimiento a Compradores")
 
-sol = sol.rename(columns={
+# ---- Normalizar nombres SOLO si existen ----
+rename_map = {
     "Número de Solped": "solped",
-    "Usuario Creador": "usuario",
     "Grupo de compras": "grupo_compras",
     "Pedido de Compras": "pedido",
     "Fecha Liberación Solped": "fecha_lib",
-    "Fecha Creación Pedido": "fecha_pedido"
-})
+    "Fecha Creación Pedido": "fecha_pedido",
+    "Usuario Creador": "usuario"
+}
+
+for col_original, col_new in rename_map.items():
+    if col_original in sol.columns:
+        sol = sol.rename(columns={col_original: col_new})
+
+# columnas base obligatorias
+base_cols = ["solped", "pedido", "fecha_lib"]
+
+for c in base_cols:
+    if c not in sol.columns:
+        sol[c] = np.nan
 
 sol["solped"] = sol["solped"].astype(str)
 sol["pedido"] = sol["pedido"].astype(str).str.replace(".0", "", regex=False)
 sol["pedido"] = sol["pedido"].replace("nan", "SIN TRATAMIENTO")
 
 sol["fecha_lib"] = pd.to_datetime(sol["fecha_lib"], errors="coerce")
-sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
+sol["fecha_pedido"] = pd.to_datetime(sol.get("fecha_pedido"), errors="coerce")
 
-# días desde liberación
+# ---- Cálculo de días ----
 sol["dias_desde_lib"] = (HOY - sol["fecha_lib"]).dt.days
 
-# días de atención
 sol["dias_atencion"] = np.where(
     sol["pedido"] != "SIN TRATAMIENTO",
     (sol["fecha_pedido"] - sol["fecha_lib"]).dt.days,
@@ -142,50 +169,41 @@ def estatus_comprador(row):
     if row["pedido"] != "SIN TRATAMIENTO":
         return "✅ ATENDIDO"
     if row["dias_desde_lib"] <= 20:
-        return f"🟢 {row['dias_desde_lib']}"
+        return f"🟢 {int(row['dias_desde_lib'])}"
     if row["dias_desde_lib"] <= 30:
-        return f"🟡 {row['dias_desde_lib']}"
-    return f"🔴 {row['dias_desde_lib']}"
+        return f"🟡 {int(row['dias_desde_lib'])}"
+    return f"🔴 {int(row['dias_desde_lib'])}"
 
 sol["estatus"] = sol.apply(estatus_comprador, axis=1)
 
-# filtro por grupo de compras
-st.subheader("🔍 Filtro Grupo de Compras")
-sol["grupo_compras"] = sol["grupo_compras"].astype(str)
-f_gc = st.multiselect(
-    "Grupo de compras",
-    sorted(sol["grupo_compras"].unique())
-)
+# ---- Mostrar SOLO columnas existentes ----
+cols_preferidas = [
+    "solped",
+    "usuario",
+    "grupo_compras",
+    "fecha_lib",
+    "pedido",
+    "fecha_pedido",
+    "dias_atencion",
+    "estatus",
+]
 
-df_sol = sol.copy()
-if f_gc:
-    df_sol = df_sol[df_sol["grupo_compras"].isin(f_gc)]
+cols_finales = [c for c in cols_preferidas if c in sol.columns]
 
 st.dataframe(
-    df_sol[
-        [
-            "solped",
-            "usuario",
-            "grupo_compras",
-            "fecha_lib",
-            "pedido",
-            "fecha_pedido",
-            "dias_atencion",
-            "estatus"
-        ]
-    ],
+    sol[cols_finales],
     use_container_width=True
 )
 
-# gráfica compradores
-fig2 = px.bar(
-    df_sol[df_sol["pedido"] != "SIN TRATAMIENTO"]
-    .groupby("grupo_compras", as_index=False)
-    .agg(promedio=("dias_atencion", "mean")),
-    x="grupo_compras",
-    y="promedio",
-    title="⏱️ Tiempo promedio de atención por grupo de compras",
-    color_discrete_sequence=["#0096A9"]
-)
-
-st.plotly_chart(fig2, use_container_width=True)
+# ---- Gráfica compradores ----
+if "grupo_compras" in sol.columns:
+    fig2 = px.bar(
+        sol[sol["pedido"] != "SIN TRATAMIENTO"]
+        .groupby("grupo_compras", as_index=False)
+        .agg(promedio=("dias_atencion", "mean")),
+        x="grupo_compras",
+        y="promedio",
+        title="⏱️ Tiempo promedio de atención por grupo de compras",
+        color_discrete_sequence=["#0096A9"]
+    )
+    st.plotly_chart(fig2, use_container_width=True)
