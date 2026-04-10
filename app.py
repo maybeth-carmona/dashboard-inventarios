@@ -45,12 +45,12 @@ ped["pedido"] = ped["pedido"].astype(str)
 # ❌ eliminar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# fechas limpias
-ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
+# fechas
+ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce")
 ped = ped[ped["fecha_pedido"].notna()].copy()
+ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce")
 
-ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
-
+# cantidades
 ped["cantidad_entregada"] = pd.to_numeric(
     ped["cantidad_entregada"], errors="coerce"
 ).fillna(0)
@@ -61,15 +61,14 @@ col_cant = st.sidebar.selectbox(
     "Columna de cantidad pedida",
     ped.columns.tolist()
 )
-
 ped["cantidad_pedida"] = pd.to_numeric(
     ped[col_cant], errors="coerce"
 ).fillna(0)
 
 # =====================================================
-# 🔑 AGREGACIÓN POR PEDIDO (PARA ESTATUS Y KPIs)
+# 🔑 AGREGACIÓN POR PEDIDO (estatus y KPIs)
 # =====================================================
-resumen_pedido = (
+resumen = (
     ped.groupby("pedido", as_index=False)
     .agg(
         proveedor=("proveedor", "first"),
@@ -78,45 +77,29 @@ resumen_pedido = (
         fecha_pedido=("fecha_pedido", "first"),
         fecha_entrega=("fecha_entrega", "first"),
         cantidad_pedida_total=("cantidad_pedida", "sum"),
-        cantidad_entregada_total=("cantidad_entregada", "sum"),
+        cantidad_entregada_total=("cantidad_entregada", "sum")
     )
 )
 
-resumen_pedido["cantidad_pendiente_pedido"] = (
-    resumen_pedido["cantidad_pedida_total"]
-    - resumen_pedido["cantidad_entregada_total"]
-)
-resumen_pedido.loc[
-    resumen_pedido["cantidad_pendiente_pedido"] < 0,
-    "cantidad_pendiente_pedido"
-] = 0
+resumen["cantidad_pendiente_pedido"] = (
+    resumen["cantidad_pedida_total"]
+    - resumen["cantidad_entregada_total"]
+).clip(lower=0)
 
-# ✅ UN PEDIDO SOLO ES ENTREGADO SI YA NO FALTA NADA
-resumen_pedido["entregado_pedido"] = (
-    resumen_pedido["cantidad_pendiente_pedido"] == 0
-)
+resumen["entregado_pedido"] = resumen["cantidad_pendiente_pedido"] == 0
 
-# demora contra FECHA COMPROMISO
-resumen_pedido["dias_demora"] = (
-    (pd.to_datetime(HOY) - pd.to_datetime(resumen_pedido["fecha_entrega"]))
+resumen["dias_demora"] = (
+    (HOY - resumen["fecha_entrega"])
     .dt.days
+    .fillna(0)
 )
-resumen_pedido["dias_demora"] = resumen_pedido["dias_demora"].fillna(0)
-resumen_pedido.loc[
-    resumen_pedido["dias_demora"] < 0,
-    "dias_demora"
-] = 0
-resumen_pedido["dias_demora"] = resumen_pedido["dias_demora"].astype(int)
+resumen.loc[resumen["dias_demora"] < 0, "dias_demora"] = 0
+resumen["dias_demora"] = resumen["dias_demora"].astype("Int64")
 
-# regresar datos al detalle
+# regresar info al detalle
 ped = ped.merge(
-    resumen_pedido[
-        [
-            "pedido",
-            "cantidad_pendiente_pedido",
-            "entregado_pedido",
-            "dias_demora",
-        ]
+    resumen[
+        ["pedido", "cantidad_pendiente_pedido", "entregado_pedido", "dias_demora"]
     ],
     on="pedido",
     how="left"
@@ -134,26 +117,42 @@ def estatus_proveedor(row):
 ped["estatus"] = ped.apply(estatus_proveedor, axis=1)
 
 # =====================================================
-# KPIs (POR PEDIDO)
+# 🔍 FILTROS PROVEEDORES
 # =====================================================
-pedidos_pendientes = resumen_pedido[
-    resumen_pedido["cantidad_pendiente_pedido"] > 0
-].shape[0]
+st.subheader("🔍 Filtros Proveedores")
 
-pedidos_con_demora = resumen_pedido[
-    (resumen_pedido["cantidad_pendiente_pedido"] > 0)
-    & (resumen_pedido["dias_demora"] > 0)
-].shape[0]
+ped["proveedor"] = ped["proveedor"].astype(str)
+ped["grupo"] = ped["grupo"].astype(str)
+ped["centro"] = ped["centro"].astype(str)
 
-col1, col2 = st.columns(2)
-col1.metric("📦 Pedidos con pendiente", pedidos_pendientes)
-col2.metric("⏰ Pedidos con demora", pedidos_con_demora)
+f_prov = st.multiselect("Proveedor", sorted(ped["proveedor"].unique()))
+f_grp = st.multiselect("Grupo de artículos", sorted(ped["grupo"].unique()))
+f_cen = st.multiselect("Centro", sorted(ped["centro"].unique()))
+
+dfp = ped.copy()
+if f_prov:
+    dfp = dfp[dfp["proveedor"].isin(f_prov)]
+if f_grp:
+    dfp = dfp[dfp["grupo"].isin(f_grp)]
+if f_cen:
+    dfp = dfp[dfp["centro"].isin(f_cen)]
+
+# KPIs por pedido
+kpi_pend = resumen[resumen["cantidad_pendiente_pedido"] > 0]["pedido"].nunique()
+kpi_dem = resumen[
+    (resumen["cantidad_pendiente_pedido"] > 0) &
+    (resumen["dias_demora"] > 0)
+]["pedido"].nunique()
+
+c1, c2 = st.columns(2)
+c1.metric("📦 Pedidos con pendiente", kpi_pend)
+c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
-# TOP 10 PROVEEDORES EN RIESGO
+# 📊 TOP 10 PROVEEDORES EN RIESGO
 # =====================================================
 top10 = (
-    resumen_pedido[resumen_pedido["cantidad_pendiente_pedido"] > 0]
+    resumen[resumen["cantidad_pendiente_pedido"] > 0]
     .groupby("proveedor", as_index=False)
     .agg(dias_promedio=("dias_demora", "mean"))
     .sort_values("dias_promedio", ascending=False)
@@ -165,31 +164,24 @@ fig1 = px.bar(
     x="proveedor",
     y="dias_promedio",
     title="🚨 TOP PROVEEDORES QUE PONEN EN RIESGO EL INVENTARIO",
-    labels={"dias_promedio": "Días de demora"},
+    labels={"dias_promedio": "Días de demora"}
 )
 st.plotly_chart(fig1, use_container_width=True)
 
-# ordenar detalle (pendientes arriba, entregados abajo)
-ped = ped.sort_values(
+# tabla detalle ordenada
+dfp = dfp.sort_values(
     by=["entregado_pedido", "dias_demora"],
     ascending=[True, False]
 )
 
 st.dataframe(
-    ped[
+    dfp[
         [
-            "pedido",
-            "proveedor",
-            "material",
-            "descripcion",
-            "grupo",
-            "centro",
-            "fecha_pedido",
-            "fecha_entrega",
-            "cantidad_pedida",
-            "cantidad_entregada",
-            "cantidad_pendiente_pedido",
-            "estatus",
+            "pedido", "proveedor", "material", "descripcion",
+            "grupo", "centro",
+            "fecha_pedido", "fecha_entrega",
+            "cantidad_pedida", "cantidad_entregada",
+            "cantidad_pendiente_pedido", "estatus"
         ]
     ],
     use_container_width=True
@@ -206,30 +198,26 @@ sol = sol.rename(columns={
     "Grupo de compras": "grupo_compras",
     "Centro": "centro",
     "Fecha Liberación Solped": "fecha_lib",
-    "Fecha Creación Pedido": "fecha_pedido",
+    "Fecha Creación Pedido": "fecha_pedido"
 })
 
 sol["solped"] = sol["solped"].astype(str)
-
-# limpiar pedido (.0 y nan)
 sol["pedido"] = sol["pedido"].astype(str).str.replace(".0", "", regex=False)
 sol["pedido"] = sol["pedido"].replace("nan", "SIN TRATAMIENTO")
 
 sol["fecha_lib"] = pd.to_datetime(sol["fecha_lib"], errors="coerce")
 sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
 
-# demora sin pedido
 sol["dias_demora"] = np.where(
     sol["pedido"] == "SIN TRATAMIENTO",
     (HOY - sol["fecha_lib"]).dt.days,
-    np.nan,
+    np.nan
 )
 
-# días reales de atención
 sol["dias_atencion"] = np.where(
     sol["pedido"] != "SIN TRATAMIENTO",
     (sol["fecha_pedido"] - sol["fecha_lib"]).dt.days,
-    np.nan,
+    np.nan
 )
 
 def estatus_comprador(d):
@@ -243,24 +231,40 @@ def estatus_comprador(d):
 
 sol["estatus"] = sol["dias_demora"].apply(estatus_comprador)
 
-# ordenar: sin tratamiento arriba
-sol = sol.sort_values(
-    by=["pedido", "dias_demora"],
-    ascending=[True, False]
-)
+sol = sol.sort_values(by=["pedido", "dias_demora"], ascending=[True, False])
 
 st.dataframe(
     sol[
         [
-            "solped",
-            "pedido",
-            "grupo_compras",
-            "centro",
-            "fecha_lib",
-            "fecha_pedido",
-            "estatus",
-            "dias_atencion",
+            "solped", "pedido", "grupo_compras", "centro",
+            "fecha_lib", "fecha_pedido",
+            "estatus", "dias_atencion"
         ]
     ],
     use_container_width=True
 )
+
+# =====================================================
+# 📈 GRÁFICA COMPRADORES
+# =====================================================
+st.subheader("📈 Tiempo de atención por grupo de compras")
+
+f_gc = st.multiselect(
+    "Filtrar grupo de compras",
+    sorted(sol["grupo_compras"].dropna().unique())
+)
+
+df_gc = sol.dropna(subset=["dias_atencion"])
+if f_gc:
+    df_gc = df_gc[df_gc["grupo_compras"].isin(f_gc)]
+
+fig2 = px.bar(
+    df_gc.groupby("grupo_compras", as_index=False)
+    .agg(promedio=("dias_atencion", "mean")),
+    x="grupo_compras",
+    y="promedio",
+    color="promedio",
+    color_continuous_scale=["green", "orange", "red"],
+    title="⏱️ Tiempo promedio para crear pedidos por grupo de compras"
+)
+st.plotly_chart(fig2, use_container_width=True)
