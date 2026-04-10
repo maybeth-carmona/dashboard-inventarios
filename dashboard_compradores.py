@@ -41,6 +41,9 @@ sol = sol.rename(columns={
     "Centro": "centro"
 })
 
+# -----------------------------------------------------
+# Limpieza básica
+# -----------------------------------------------------
 sol["solped"] = sol["solped"].astype(str)
 sol["pedido"] = sol["pedido"].astype(str).str.replace(".0", "", regex=False)
 
@@ -48,9 +51,12 @@ sol["fecha_lib"] = pd.to_datetime(sol["fecha_lib"], errors="coerce")
 sol["fecha_pedido"] = pd.to_datetime(sol["fecha_pedido"], errors="coerce")
 
 # =====================================================
-# CÁLCULOS PRINCIPALES
+# CÁLCULOS
 # =====================================================
 sol["dias_desde_lib"] = (HOY - sol["fecha_lib"]).dt.days
+
+# Asegurar que dias_desde_lib nunca sea NaN
+sol["dias_desde_lib"] = sol["dias_desde_lib"].fillna(0).astype(int)
 
 # días de atención solo si hay pedido
 sol["dias_atencion"] = np.where(
@@ -59,10 +65,17 @@ sol["dias_atencion"] = np.where(
     np.nan
 )
 
+# =====================================================
+# ESTATUS CON SEMÁFORO (CORREGIDO)
+# =====================================================
 def estatus_solped(row):
+    # Ya atendidas
     if pd.notna(row["dias_atencion"]):
-        return "✅ ATENDIDA"
-    d = int(row["dias_desde_lib"])
+        return f"✅ ATENDIDA ({int(row['dias_atencion'])} días)"
+
+    # No atendidas → semáforo por días
+    d = row["dias_desde_lib"]
+
     if d > 100:
         return f"🔥 {d}"
     if d > 60:
@@ -113,7 +126,7 @@ fig = px.bar(
     y="promedio_dias",
     color="promedio_dias",
     color_continuous_scale=["green", "yellow", "red"],
-    title="Promedio de días para atender Solped"
+    title="Promedio de días para atender solicitudes"
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -123,7 +136,7 @@ st.plotly_chart(fig, use_container_width=True)
 # =====================================================
 st.subheader("📋 Análisis de Atención a Solicitudes")
 
-# Orden: primero no atendidas más demoradas
+# Orden: no atendidas arriba, más demoradas primero
 df["orden_atendida"] = df["dias_atencion"].apply(lambda x: 1 if pd.notna(x) else 0)
 
 df = df.sort_values(
