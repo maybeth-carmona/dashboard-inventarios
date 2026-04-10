@@ -16,6 +16,7 @@ HOY = pd.to_datetime(datetime.today().date())
 # BARRA LATERAL – ARCHIVO Y FILTROS
 # =====================================================
 st.sidebar.header("📂 Archivo SAP")
+
 file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
 
 if file_ped is None:
@@ -28,7 +29,7 @@ st.sidebar.divider()
 st.sidebar.subheader("🔍 Filtros")
 
 # =====================================================
-# 🚚 SEGUIMIENTO A PROVEEDORES (LÓGICA CONGELADA)
+# 🚚 SEGUIMIENTO A PROVEEDORES
 # =====================================================
 st.header("🚚 Seguimiento a Proveedores")
 
@@ -49,7 +50,7 @@ ped["pedido"] = ped["pedido"].astype(str)
 # Quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# Fechas SIN hora
+# Fechas sin hora
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
@@ -59,7 +60,7 @@ ped["cantidad_entregada"] = pd.to_numeric(
     ped["cantidad_entregada"], errors="coerce"
 ).fillna(0)
 
-# Cantidad solicitada (SAP variable)
+# Cantidad solicitada
 col_cant = st.sidebar.selectbox(
     "📦 Columna de cantidad pedida",
     ped.columns.tolist()
@@ -68,9 +69,9 @@ ped["cantidad_pedida"] = pd.to_numeric(
     ped[col_cant], errors="coerce"
 ).fillna(0)
 
-# -----------------------------------------------------
-# RESUMEN POR PEDIDO (NEGOCIO VALIDADO)
-# -----------------------------------------------------
+# =====================================================
+# RESUMEN POR PEDIDO (LÓGICA CONGELADA)
+# =====================================================
 resumen = (
     ped.groupby("pedido", as_index=False)
     .agg(
@@ -82,10 +83,6 @@ resumen = (
         entregada_total=("cantidad_entregada", "sum"),
     )
 )
-
-resumen["pendiente_pedido"] = (
-    resumen["pedida_total"] - resumen["entregada_total"]
-).clip(lower=0)
 
 # Criterio operativo
 resumen["tiene_mr"] = resumen["entregada_total"] > 0
@@ -99,12 +96,14 @@ resumen["dias_demora"] = (
 
 # Volver al detalle
 ped = ped.merge(
-    resumen[["pedido", "pendiente_pedido", "tiene_mr", "dias_demora"]],
+    resumen[["pedido", "tiene_mr", "dias_demora"]],
     on="pedido",
     how="left"
 )
 
-# Semáforo (se queda rojo / amarillo / verde)
+# =====================================================
+# SEMÁFORO
+# =====================================================
 def estatus_proveedor(row):
     if row["tiene_mr"]:
         return "✅ Entregado"
@@ -118,7 +117,7 @@ def estatus_proveedor(row):
 ped["estatus"] = ped.apply(estatus_proveedor, axis=1)
 
 # =====================================================
-# FILTROS (BARRA LATERAL)
+# FILTROS
 # =====================================================
 ped["proveedor"] = ped["proveedor"].astype(str)
 ped["grupo"] = ped["grupo"].astype(str)
@@ -147,8 +146,7 @@ c1.metric("📦 Pedidos SIN MR", kpi_pend)
 c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
-# 📊 GRÁFICA FINAL (VERDE CORPORATIVO)
-# RGB (105,163,65) → #69A341
+# 📊 GRÁFICA VERDE CORPORATIVO
 # =====================================================
 top10 = (
     dfp[~dfp["tiene_mr"]]
@@ -169,7 +167,7 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 TABLA FINAL
+# 📋 TABLA FINAL (SIN PENDIENTE_Pedido)
 # =====================================================
 dfp = dfp.sort_values(by=["tiene_mr", "dias_demora"], ascending=[True, False])
 
@@ -186,7 +184,6 @@ st.dataframe(
             "fecha_entrega",
             "cantidad_pedida",
             "cantidad_entregada",
-            "pendiente_pedido",
             "estatus",
         ]
     ],
