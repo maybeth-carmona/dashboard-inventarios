@@ -42,10 +42,12 @@ ped = ped.rename(columns={
     "Fecha Creación Pedido": "fecha_pedido",
     "Fecha de Entrega": "fecha_entrega",
     "Cantidad Entregada": "cantidad_entregada",
-    "Indicador Entrega Final": "entrega_final"  # Q1
+    "Indicador Entrega Final": "entrega_final"  # Q1 SAP
 })
 
-# Normalización
+# -----------------------------------------------------
+# Normalización básica
+# -----------------------------------------------------
 ped["pedido"] = ped["pedido"].astype(str)
 ped["entrega_final"] = ped["entrega_final"].astype(str).str.upper()
 
@@ -57,7 +59,7 @@ ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.da
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-# Cantidades (por partida)
+# Cantidades POR PARTIDA
 ped["cantidad_entregada"] = pd.to_numeric(
     ped["cantidad_entregada"], errors="coerce"
 ).fillna(0)
@@ -70,14 +72,14 @@ ped["cantidad_pedida"] = pd.to_numeric(
     ped[col_cant], errors="coerce"
 ).fillna(0)
 
-# ✅ CORRECCIÓN CLAVE:
-# La cantidad entregada visible NO puede ser mayor que la pedida
+# 👉 Corrección clave:
+# Nunca mostrar entregada mayor que pedida
 ped["cantidad_entregada_visible"] = ped[
     ["cantidad_entregada", "cantidad_pedida"]
 ].min(axis=1)
 
 # =====================================================
-# DEMORA Y ESTATUS
+# DEMORA Y ESTATUS (SAP MANDA)
 # =====================================================
 ped["dias_demora"] = (
     HOY - pd.to_datetime(ped["fecha_entrega"])
@@ -116,17 +118,19 @@ if f_cen:
     dfp = dfp[dfp["centro"].isin(f_cen)]
 
 # =====================================================
-# KPIs
+# KPIs (POR PEDIDO)
 # =====================================================
 kpi_pend = dfp[dfp["entrega_final"] != "X"]["pedido"].nunique()
-kpi_dem = dfp[(dfp["entrega_final"] != "X") & (dfp["dias_demora"] > 0)]["pedido"].nunique()
+kpi_dem = dfp[
+    (dfp["entrega_final"] != "X") & (dfp["dias_demora"] > 0)
+]["pedido"].nunique()
 
 c1, c2 = st.columns(2)
 c1.metric("📦 Pedidos SIN Entrega Final", kpi_pend)
 c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
-# 📊 GRÁFICA (VERDE CORPORATIVO)
+# 📊 GRÁFICA – VERDE CORPORATIVO
 # =====================================================
 top10 = (
     dfp[dfp["entrega_final"] != "X"]
@@ -146,13 +150,22 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 TABLA FINAL – ORDEN CORRECTO
+# 📋 ORDEN FINAL (LO QUE PEDISTE)
+# Pendientes arriba, más demorados primero,
+# entregados hasta abajo
 # =====================================================
+dfp["orden_entrega"] = dfp["entrega_final"].apply(
+    lambda x: 1 if x == "X" else 0
+)
+
 dfp = dfp.sort_values(
-    by=["entrega_final", "dias_demora"],
+    by=["orden_entrega", "dias_demora"],
     ascending=[True, False]
 )
 
+# =====================================================
+# 📋 TABLA FINAL
+# =====================================================
 st.dataframe(
     dfp[
         [
