@@ -41,12 +41,13 @@ ped = ped.rename(columns={
     "Centro": "centro",
     "Fecha Creación Pedido": "fecha_pedido",
     "Fecha de Entrega": "fecha_entrega",
-    "Cantidad Entregada": "cantidad_entregada",
-    "Indicador Entrega Final": "entrega_final"  # Q1 SAP
+    "Cantidad de Mat en U": "cantidad_pedida",          # ✅ CORRECTA
+    "Cantidad Entregada": "cantidad_entregada",         # ✅ CORRECTA
+    "Indicador Entrega Final": "entrega_final"          # Q1
 })
 
 # -----------------------------------------------------
-# Normalización básica
+# Normalización
 # -----------------------------------------------------
 ped["pedido"] = ped["pedido"].astype(str)
 ped["entrega_final"] = ped["entrega_final"].astype(str).str.upper()
@@ -54,26 +55,16 @@ ped["entrega_final"] = ped["entrega_final"].astype(str).str.upper()
 # Quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# Fechas sin hora
+# Fechas SIN hora
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-# Cantidades POR PARTIDA
-ped["cantidad_entregada"] = pd.to_numeric(
-    ped["cantidad_entregada"], errors="coerce"
-).fillna(0)
+# Cantidades POR PARTIDA (limpias)
+ped["cantidad_pedida"] = pd.to_numeric(ped["cantidad_pedida"], errors="coerce").fillna(0)
+ped["cantidad_entregada"] = pd.to_numeric(ped["cantidad_entregada"], errors="coerce").fillna(0)
 
-col_cant = st.sidebar.selectbox(
-    "📦 Columna de cantidad pedida (partida)",
-    ped.columns.tolist()
-)
-ped["cantidad_pedida"] = pd.to_numeric(
-    ped[col_cant], errors="coerce"
-).fillna(0)
-
-# 👉 Corrección clave:
-# Nunca mostrar entregada mayor que pedida
+# ✅ Protección visual: nunca mostrar más entregado que pedido
 ped["cantidad_entregada_visible"] = ped[
     ["cantidad_entregada", "cantidad_pedida"]
 ].min(axis=1)
@@ -101,9 +92,8 @@ ped["estatus"] = ped.apply(estatus_proveedor, axis=1)
 # =====================================================
 # FILTROS
 # =====================================================
-ped["proveedor"] = ped["proveedor"].astype(str)
-ped["grupo"] = ped["grupo"].astype(str)
-ped["centro"] = ped["centro"].astype(str)
+for col in ["proveedor", "grupo", "centro"]:
+    ped[col] = ped[col].astype(str)
 
 f_prov = st.sidebar.multiselect("Proveedor", sorted(ped["proveedor"].unique()))
 f_grp = st.sidebar.multiselect("Grupo artículos", sorted(ped["grupo"].unique()))
@@ -118,12 +108,10 @@ if f_cen:
     dfp = dfp[dfp["centro"].isin(f_cen)]
 
 # =====================================================
-# KPIs (POR PEDIDO)
+# KPIs
 # =====================================================
 kpi_pend = dfp[dfp["entrega_final"] != "X"]["pedido"].nunique()
-kpi_dem = dfp[
-    (dfp["entrega_final"] != "X") & (dfp["dias_demora"] > 0)
-]["pedido"].nunique()
+kpi_dem = dfp[(dfp["entrega_final"] != "X") & (dfp["dias_demora"] > 0)]["pedido"].nunique()
 
 c1, c2 = st.columns(2)
 c1.metric("📦 Pedidos SIN Entrega Final", kpi_pend)
@@ -150,13 +138,11 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 ORDEN FINAL (LO QUE PEDISTE)
+# 📋 ORDEN FINAL
 # Pendientes arriba, más demorados primero,
 # entregados hasta abajo
 # =====================================================
-dfp["orden_entrega"] = dfp["entrega_final"].apply(
-    lambda x: 1 if x == "X" else 0
-)
+dfp["orden_entrega"] = dfp["entrega_final"].apply(lambda x: 1 if x == "X" else 0)
 
 dfp = dfp.sort_values(
     by=["orden_entrega", "dias_demora"],
@@ -164,7 +150,7 @@ dfp = dfp.sort_values(
 )
 
 # =====================================================
-# 📋 TABLA FINAL
+# 📋 TABLA FINAL DEFINITIVA
 # =====================================================
 st.dataframe(
     dfp[
