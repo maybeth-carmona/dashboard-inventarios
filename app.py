@@ -13,10 +13,9 @@ st.title("📊 Seguimiento a Proveedores – Compras")
 HOY = pd.to_datetime(datetime.today().date())
 
 # =====================================================
-# CARGA ARCHIVO
+# BARRA LATERAL – ARCHIVO Y FILTROS
 # =====================================================
 st.sidebar.header("📂 Archivo SAP")
-
 file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
 
 if file_ped is None:
@@ -25,8 +24,11 @@ if file_ped is None:
 
 ped = pd.read_excel(file_ped)
 
+st.sidebar.divider()
+st.sidebar.subheader("🔍 Filtros")
+
 # =====================================================
-# 🚚 SEGUIMIENTO A PROVEEDORES
+# 🚚 SEGUIMIENTO A PROVEEDORES (LÓGICA CONGELADA)
 # =====================================================
 st.header("🚚 Seguimiento a Proveedores")
 
@@ -44,33 +46,31 @@ ped = ped.rename(columns={
 
 ped["pedido"] = ped["pedido"].astype(str)
 
-# ❌ Quitar convenios
+# Quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# ✅ Fechas SIN hora
+# Fechas SIN hora
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-# ✅ Cantidades
+# Cantidades
 ped["cantidad_entregada"] = pd.to_numeric(
     ped["cantidad_entregada"], errors="coerce"
 ).fillna(0)
 
-# ✅ Cantidad solicitada
-st.sidebar.subheader("📦 Cantidad solicitada")
+# Cantidad solicitada (SAP variable)
 col_cant = st.sidebar.selectbox(
-    "Columna de cantidad pedida",
+    "📦 Columna de cantidad pedida",
     ped.columns.tolist()
 )
-
 ped["cantidad_pedida"] = pd.to_numeric(
     ped[col_cant], errors="coerce"
 ).fillna(0)
 
-# =====================================================
-# RESUMEN POR PEDIDO (LÓGICA VALIDADA)
-# =====================================================
+# -----------------------------------------------------
+# RESUMEN POR PEDIDO (NEGOCIO VALIDADO)
+# -----------------------------------------------------
 resumen = (
     ped.groupby("pedido", as_index=False)
     .agg(
@@ -87,7 +87,7 @@ resumen["pendiente_pedido"] = (
     resumen["pedida_total"] - resumen["entregada_total"]
 ).clip(lower=0)
 
-# ✅ Criterio operativo
+# Criterio operativo
 resumen["tiene_mr"] = resumen["entregada_total"] > 0
 
 resumen["dias_demora"] = (
@@ -97,40 +97,36 @@ resumen["dias_demora"] = (
     .clip(lower=0)
 )
 
-# Volver a detalle
+# Volver al detalle
 ped = ped.merge(
     resumen[["pedido", "pendiente_pedido", "tiene_mr", "dias_demora"]],
     on="pedido",
     how="left"
 )
 
-# =====================================================
-# SEMÁFORO (CONSERVADO)
-# =====================================================
+# Semáforo (se queda rojo / amarillo / verde)
 def estatus_proveedor(row):
     if row["tiene_mr"]:
         return "✅ Entregado"
-    d = row["dias_demora"]
+    d = int(row["dias_demora"])
     if d > 60:
-        return f"🔴 {int(d)}"
+        return f"🔴 {d}"
     if d > 30:
-        return f"🟡 {int(d)}"
-    return f"🟢 {int(d)}"
+        return f"🟡 {d}"
+    return f"🟢 {d}"
 
 ped["estatus"] = ped.apply(estatus_proveedor, axis=1)
 
 # =====================================================
-# 🔍 FILTROS
+# FILTROS (BARRA LATERAL)
 # =====================================================
-st.subheader("🔍 Filtros")
-
 ped["proveedor"] = ped["proveedor"].astype(str)
 ped["grupo"] = ped["grupo"].astype(str)
 ped["centro"] = ped["centro"].astype(str)
 
-f_prov = st.multiselect("Proveedor", sorted(ped["proveedor"].unique()))
-f_grp = st.multiselect("Grupo artículos", sorted(ped["grupo"].unique()))
-f_cen = st.multiselect("Centro", sorted(ped["centro"].unique()))
+f_prov = st.sidebar.multiselect("Proveedor", sorted(ped["proveedor"].unique()))
+f_grp = st.sidebar.multiselect("Grupo artículos", sorted(ped["grupo"].unique()))
+f_cen = st.sidebar.multiselect("Centro", sorted(ped["centro"].unique()))
 
 dfp = ped.copy()
 if f_prov:
@@ -152,6 +148,7 @@ c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
 # 📊 GRÁFICA FINAL (VERDE CORPORATIVO)
+# RGB (105,163,65) → #69A341
 # =====================================================
 top10 = (
     dfp[~dfp["tiene_mr"]]
@@ -195,4 +192,3 @@ st.dataframe(
     ],
     use_container_width=True
 )
-``
