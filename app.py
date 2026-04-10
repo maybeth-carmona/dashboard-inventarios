@@ -42,7 +42,8 @@ ped = ped.rename(columns={
     "Centro": "centro",
     "Fecha Creación Pedido": "fecha_pedido",
     "Fecha de Entrega": "fecha_entrega",
-    "Cantidad Entregada": "cantidad_entregada"
+    "Cantidad Entregada": "cantidad_entregada",
+    "Indicador Entrega Final": "entrega_final"  # 📌 Q1
 })
 
 ped["pedido"] = ped["pedido"].astype(str)
@@ -50,12 +51,12 @@ ped["pedido"] = ped["pedido"].astype(str)
 # Quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# Fechas sin hora
+# Fechas SIN hora
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
 ped = ped[ped["fecha_pedido"].notna()].copy()
 
-# Cantidades
+# Cantidades (solo informativas)
 ped["cantidad_entregada"] = pd.to_numeric(
     ped["cantidad_entregada"], errors="coerce"
 ).fillna(0)
@@ -70,42 +71,19 @@ ped["cantidad_pedida"] = pd.to_numeric(
 ).fillna(0)
 
 # =====================================================
-# RESUMEN POR PEDIDO (LÓGICA CONGELADA)
+# LÓGICA CORRECTA DE ESTATUS (USANDO Q1)
 # =====================================================
-resumen = (
-    ped.groupby("pedido", as_index=False)
-    .agg(
-        proveedor=("proveedor", "first"),
-        grupo=("grupo", "first"),
-        centro=("centro", "first"),
-        fecha_entrega=("fecha_entrega", "first"),
-        pedida_total=("cantidad_pedida", "sum"),
-        entregada_total=("cantidad_entregada", "sum"),
-    )
-)
+ped["entrega_final"] = ped["entrega_final"].astype(str).str.upper()
 
-# Criterio operativo
-resumen["tiene_mr"] = resumen["entregada_total"] > 0
-
-resumen["dias_demora"] = (
-    (HOY - pd.to_datetime(resumen["fecha_entrega"]))
+ped["dias_demora"] = (
+    (HOY - pd.to_datetime(ped["fecha_entrega"]))
     .dt.days
     .fillna(0)
     .clip(lower=0)
 )
 
-# Volver al detalle
-ped = ped.merge(
-    resumen[["pedido", "tiene_mr", "dias_demora"]],
-    on="pedido",
-    how="left"
-)
-
-# =====================================================
-# SEMÁFORO
-# =====================================================
 def estatus_proveedor(row):
-    if row["tiene_mr"]:
+    if row["entrega_final"] == "X":
         return "✅ Entregado"
     d = int(row["dias_demora"])
     if d > 60:
@@ -117,7 +95,7 @@ def estatus_proveedor(row):
 ped["estatus"] = ped.apply(estatus_proveedor, axis=1)
 
 # =====================================================
-# FILTROS
+# FILTROS (BARRA LATERAL)
 # =====================================================
 ped["proveedor"] = ped["proveedor"].astype(str)
 ped["grupo"] = ped["grupo"].astype(str)
@@ -136,20 +114,20 @@ if f_cen:
     dfp = dfp[dfp["centro"].isin(f_cen)]
 
 # =====================================================
-# KPIs
+# KPIs (USAN Q1, NO CANTIDADES)
 # =====================================================
-kpi_pend = dfp[~dfp["tiene_mr"]]["pedido"].nunique()
-kpi_dem = dfp[(~dfp["tiene_mr"]) & (dfp["dias_demora"] > 0)]["pedido"].nunique()
+kpi_pend = dfp[dfp["entrega_final"] != "X"]["pedido"].nunique()
+kpi_dem = dfp[(dfp["entrega_final"] != "X") & (dfp["dias_demora"] > 0)]["pedido"].nunique()
 
 c1, c2 = st.columns(2)
-c1.metric("📦 Pedidos SIN MR", kpi_pend)
+c1.metric("📦 Pedidos SIN Entrega Final", kpi_pend)
 c2.metric("⏰ Pedidos con demora", kpi_dem)
 
 # =====================================================
-# 📊 GRÁFICA VERDE CORPORATIVO
+# 📊 GRÁFICA (VERDE CORPORATIVO)
 # =====================================================
 top10 = (
-    dfp[~dfp["tiene_mr"]]
+    dfp[dfp["entrega_final"] != "X"]
     .groupby("proveedor", as_index=False)
     .agg(promedio=("dias_demora", "mean"))
     .sort_values("promedio", ascending=False)
@@ -167,9 +145,9 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 TABLA FINAL (SIN PENDIENTE_Pedido)
+# 📋 TABLA FINAL
 # =====================================================
-dfp = dfp.sort_values(by=["tiene_mr", "dias_demora"], ascending=[True, False])
+dfp = dfp.sort_values(by=["entrega_final", "dias_demora"], ascending=[True, False])
 
 st.dataframe(
     dfp[
