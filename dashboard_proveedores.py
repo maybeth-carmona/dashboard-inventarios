@@ -6,32 +6,26 @@ from datetime import datetime
 # =====================================================
 # CONFIG GENERAL
 # =====================================================
-st.set_page_config(page_title="Dashboard Proveedores", layout="wide")
-st.title("📊 Seguimiento a Proveedores – Compras")
+st.set_page_config(page_title="Riesgo en Compras | Seguimiento a Proveedores", layout="wide")
+st.title("Riesgo en Compras | Seguimiento a Proveedores")
 
 HOY = pd.to_datetime(datetime.today().date())
 
 # =====================================================
-# BARRA LATERAL – ARCHIVO Y FILTROS
+# CARGA ARCHIVO
 # =====================================================
 st.sidebar.header("📂 Archivo SAP")
 
 file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
-
 if file_ped is None:
-    st.info("⬅️ Carga el archivo de Pedidos de Compras")
+    st.info("Carga el archivo de pedidos")
     st.stop()
 
 ped = pd.read_excel(file_ped)
 
-st.sidebar.divider()
-st.sidebar.subheader("🔍 Filtros")
-
 # =====================================================
-# 🚚 SEGUIMIENTO A PROVEEDORES
+# NORMALIZACIÓN DE COLUMNAS
 # =====================================================
-st.header("🚚 Seguimiento a Proveedores")
-
 ped = ped.rename(columns={
     "Pedido de Compras": "pedido",
     "Proveedor TEXT": "proveedor",
@@ -46,147 +40,103 @@ ped = ped.rename(columns={
 })
 
 # =====================================================
-# 🔒 PROVEEDORES A OCULTAR DEL REPORTE
-# =====================================================
-proveedores_a_ocultar = [
-    "PROVEEDOR DEMO",
-    "PRUEBAS INTERNAS",
-    "ABC TEST SUPPLIER"
-]
-
-ped["proveedor"] = ped["proveedor"].astype(str)
-ped = ped[~ped["proveedor"].isin(proveedores_a_ocultar)].copy()
-
-# =====================================================
-# NORMALIZACIÓN
+# LIMPIEZA BASE
 # =====================================================
 ped["pedido"] = ped["pedido"].astype(str)
+ped["proveedor"] = ped["proveedor"].astype(str)
 
-# Quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-# Fechas sin hora
 ped["fecha_pedido"] = pd.to_datetime(ped["fecha_pedido"], errors="coerce").dt.date
 ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
-ped = ped[ped["fecha_pedido"].notna()].copy()
+ped = ped[ped["fecha_entrega"].notna()].copy()
 
-# Cantidades por partida
 ped["cantidad_pedida"] = pd.to_numeric(ped["cantidad_pedida"], errors="coerce").fillna(0)
 ped["cantidad_entregada"] = pd.to_numeric(ped["cantidad_entregada"], errors="coerce").fillna(0)
 
-# Nunca mostrar más entregado que pedido
-ped["cantidad_entregada_visible"] = ped[
-    ["cantidad_entregada", "cantidad_pedida"]
-].min(axis=1)
+ped["cantidad_entregada_visible"] = ped[["cantidad_entregada","cantidad_pedida"]].min(axis=1)
 
 # =====================================================
-# DEMORA
+# QUITAR ENTREGADOS COMPLETOS (OPTIMIZACIÓN)
 # =====================================================
-ped["dias_demora"] = (
-    HOY - pd.to_datetime(ped["fecha_entrega"])
-).dt.days.fillna(0)
+ped = ped[ped["cantidad_entregada_visible"] < ped["cantidad_pedida"]].copy()
+
+# =====================================================
+# DEMORA Y ESTATUS
+# =====================================================
+ped["dias_demora"] = (HOY - pd.to_datetime(ped["fecha_entrega"])).dt.days.fillna(0)
 ped.loc[ped["dias_demora"] < 0, "dias_demora"] = 0
 
-# =====================================================
-# ESTATUS CORRECTO (SEGÚN CANTIDAD REAL)
-# =====================================================
-def estatus_proveedor(row):
-    # Aún pendiente
-    if row["cantidad_entregada_visible"] < row["cantidad_pedida"]:
-        d = int(row["dias_demora"])
-        if d > 60:
-            return f"🔴 {d}"
-        if d > 30:
-            return f"🟡 {d}"
-        return f"🟢 {d}"
+def estatus_proveedor(d):
+    if d > 60:
+        return f"🔴 {d}"
+    if d > 30:
+        return f"🟡 {d}"
+    return f"🟢 {d}"
 
-    # Entregado completo
-    return "✅ Entregado"
-
-ped["estatus"] = ped.apply(estatus_proveedor, axis=1)
+ped["estatus"] = ped["dias_demora"].apply(estatus_proveedor)
 
 # =====================================================
-# FILTROS
+# FILTROS TIPO EXCEL (PALOMITAS POR COLUMNA)
 # =====================================================
-for col in ["grupo", "centro"]:
-    ped[col] = ped[col].astype(str)
+st.sidebar.subheader("🔍 Filtros")
 
-f_prov = st.sidebar.multiselect("Proveedor", sorted(ped["proveedor"].unique()))
-f_grp = st.sidebar.multiselect("Grupo de artículos", sorted(ped["grupo"].unique()))
-f_cen = st.sidebar.multiselect("Centro", sorted(ped["centro"].unique()))
+f_prov = st.sidebar.multiselect("Proveedor", sorted(ped["proveedor"].unique()), default=sorted(ped["proveedor"].unique()))
+f_ped = st.sidebar.multiselect("Pedido", sorted(ped["pedido"].unique()), default=sorted(ped["pedido"].unique()))
+f_grp = st.sidebar.multiselect("Grupo artículos", sorted(ped["grupo"].unique()), default=sorted(ped["grupo"].unique()))
+f_cen = st.sidebar.multiselect("Centro", sorted(ped["centro"].unique()), default=sorted(ped["centro"].unique()))
+f_mat = st.sidebar.multiselect("Material", sorted(ped["material"].astype(str).unique()))
 
-dfp = ped.copy()
-if f_prov:
-    dfp = dfp[dfp["proveedor"].isin(f_prov)]
-if f_grp:
-    dfp = dfp[dfp["grupo"].isin(f_grp)]
-if f_cen:
-    dfp = dfp[dfp["centro"].isin(f_cen)]
+df = ped[
+    (ped["proveedor"].isin(f_prov)) &
+    (ped["pedido"].isin(f_ped)) &
+    (ped["grupo"].isin(f_grp)) &
+    (ped["centro"].isin(f_cen))
+].copy()
+
+if f_mat:
+    df = df[df["material"].astype(str).isin(f_mat)]
 
 # =====================================================
-# KPIs (POR PEDIDO REALMENTE PENDIENTE)
+# KPIs
 # =====================================================
-kpi_pend = dfp[
-    dfp["cantidad_entregada_visible"] < dfp["cantidad_pedida"]
-]["pedido"].nunique()
-
-kpi_dem = dfp[
-    (dfp["cantidad_entregada_visible"] < dfp["cantidad_pedida"]) &
-    (dfp["dias_demora"] > 0)
-]["pedido"].nunique()
-
 c1, c2 = st.columns(2)
-c1.metric("📦 Pedidos con entrega pendiente", kpi_pend)
-c2.metric("⏰ Pedidos con atraso", kpi_dem)
+c1.metric("Pedidos en riesgo", df["pedido"].nunique())
+c2.metric("Pedidos con atraso", df[df["dias_demora"] > 0]["pedido"].nunique())
 
 # =====================================================
-# 📊 GRÁFICA — SOLO LO QUE AÚN NO SE ENTREGA
+# GRÁFICA
 # =====================================================
 top10 = (
-    dfp[dfp["cantidad_entregada_visible"] < dfp["cantidad_pedida"]]
-    .groupby("proveedor", as_index=False)
-    .agg(promedio=("dias_demora", "mean"))
-    .sort_values("promedio", ascending=False)
-    .head(10)
+    df.groupby("proveedor", as_index=False)
+      .agg(promedio=("dias_demora","mean"))
+      .sort_values("promedio", ascending=False)
+      .head(10)
 )
 
 fig = px.bar(
     top10,
     x="proveedor",
     y="promedio",
-    title="Top 10 proveedores que ponen en riesgo los niveles de inventario",
+    title="Proveedores que ponen en riesgo el inventario",
     color_discrete_sequence=["#69A341"]
 )
-
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# 📋 TABLA FINAL — ORDEN CORRECTO
+# TABLA FINAL
 # =====================================================
-dfp["orden_entrega"] = dfp.apply(
-    lambda r: 0 if r["cantidad_entregada_visible"] < r["cantidad_pedida"] else 1,
-    axis=1
-)
+df = df.sort_values("dias_demora", ascending=False)
 
-dfp = dfp.sort_values(
-    by=["orden_entrega", "dias_demora"],
-    ascending=[True, False]
-)
+st.subheader("Detalle de pedidos en riesgo")
 
 st.dataframe(
-    dfp[
+    df[
         [
-            "pedido",
-            "proveedor",
-            "material",
-            "descripcion",
-            "grupo",
-            "centro",
-            "fecha_pedido",
-            "fecha_entrega",
-            "cantidad_pedida",
-            "cantidad_entregada_visible",
-            "estatus",
+            "pedido","proveedor","material","descripcion",
+            "grupo","centro","fecha_pedido","fecha_entrega",
+            "cantidad_pedida","cantidad_entregada_visible",
+            "estatus"
         ]
     ],
     use_container_width=True
