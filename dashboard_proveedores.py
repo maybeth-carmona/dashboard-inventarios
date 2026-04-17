@@ -10,6 +10,7 @@ st.set_page_config(
     page_title="Riesgo en Compras | Seguimiento a Proveedores",
     layout="wide"
 )
+
 st.title("Riesgo en Compras | Seguimiento a Proveedores")
 
 HOY = pd.to_datetime(datetime.today().date())
@@ -21,7 +22,6 @@ st.sidebar.header("📂 Archivo SAP")
 
 file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
 if file_ped is None:
-    st.info("Carga el archivo de pedidos")
     st.stop()
 
 ped = pd.read_excel(file_ped)
@@ -49,12 +49,11 @@ ped["pedido"] = ped["pedido"].astype(str)
 ped["proveedor"] = ped["proveedor"].astype(str)
 ped["grupo"] = ped["grupo"].astype(str)
 ped["centro"] = ped["centro"].astype(str)
-ped["material"] = ped["material"].astype(str)
 
-# Quitar convenios
+# quitar convenios
 ped = ped[~ped["pedido"].str.startswith(("256", "266"))].copy()
 
-ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce").dt.date
+ped["fecha_entrega"] = pd.to_datetime(ped["fecha_entrega"], errors="coerce")
 ped = ped[ped["fecha_entrega"].notna()].copy()
 
 ped["cantidad_pedida"] = pd.to_numeric(ped["cantidad_pedida"], errors="coerce").fillna(0)
@@ -65,83 +64,103 @@ ped["cantidad_entregada_visible"] = ped[
 ].min(axis=1)
 
 # =====================================================
-# SOLO PENDIENTES (OPTIMIZA Y LIMPIA)
+# SOLO PEDIDOS AÚN PENDIENTES (OPTIMIZA)
 # =====================================================
 ped = ped[ped["cantidad_entregada_visible"] < ped["cantidad_pedida"]].copy()
 
 # =====================================================
 # DEMORA Y SEMÁFORO
 # =====================================================
-ped["dias_demora"] = (
-    HOY - pd.to_datetime(ped["fecha_entrega"])
-).dt.days.fillna(0)
+ped["dias_demora"] = (HOY - ped["fecha_entrega"]).dt.days
 ped.loc[ped["dias_demora"] < 0, "dias_demora"] = 0
 
-def estatus_proveedor(d):
+def semaforo(d):
     if d > 60:
         return f"🔴 {d}"
     if d > 30:
         return f"🟡 {d}"
     return f"🟢 {d}"
 
-ped["estatus"] = ped["dias_demora"].apply(estatus_proveedor)
+ped["estatus"] = ped["dias_demora"].apply(semaforo)
 
 # =====================================================
-# FILTROS TIPO EXCEL (PALOMITAS)
+# FILTROS TIPO EXCEL
 # =====================================================
 st.sidebar.subheader("🔍 Filtros")
 
-prov_opts = sorted(ped["proveedor"].dropna().unique().tolist())
-grp_opts = sorted(ped["grupo"].dropna().unique().tolist())
-cen_opts = sorted(ped["centro"].dropna().unique().tolist())
-mat_opts = sorted(ped["material"].dropna().unique().tolist())
-ped_opts = sorted(ped["pedido"].dropna().unique().tolist())
+f_prov = st.sidebar.multiselect(
+    "Proveedor",
+    sorted(ped["proveedor"].unique()),
+    default=sorted(ped["proveedor"].unique())
+)
 
-f_prov = st.sidebar.multiselect("Proveedor", prov_opts, default=prov_opts)
-f_grp = st.sidebar.multiselect("Grupo artículos", grp_opts, default=grp_opts)
-f_cen = st.sidebar.multiselect("Centro", cen_opts, default=cen_opts)
-f_mat = st.sidebar.multiselect("Material", mat_opts)
-f_ped = st.sidebar.multiselect("Pedido", ped_opts)
+f_grp = st.sidebar.multiselect(
+    "Grupo artículos",
+    sorted(ped["grupo"].unique()),
+    default=sorted(ped["grupo"].unique())
+)
+
+f_cen = st.sidebar.multiselect(
+    "Centro",
+    sorted(ped["centro"].unique()),
+    default=sorted(ped["centro"].unique())
+)
 
 df = ped[
-    ped["proveedor"].isin(f_prov) &
-    ped["grupo"].isin(f_grp) &
-    ped["centro"].isin(f_cen)
+    (ped["proveedor"].isin(f_prov)) &
+    (ped["grupo"].isin(f_grp)) &
+    (ped["centro"].isin(f_cen))
 ].copy()
 
-if f_mat:
-    df = df[df["material"].isin(f_mat)]
-if f_ped:
-    df = df[df["pedido"].isin(f_ped)]
+# =====================================================
+# KPIs GRANDES
+# =====================================================
+kpi_total = df["pedido"].nunique()
+kpi_atraso = df[df["dias_demora"] > 0]["pedido"].nunique()
+
+k1, k2 = st.columns(2)
+k1.metric("Pedidos en riesgo", kpi_total)
+k2.metric("Pedidos con atraso", kpi_atraso)
 
 # =====================================================
-# KPIs
+# GRÁFICA DE RIESGO (DEGRADADO)
 # =====================================================
-c1, c2 = st.columns(2)
-c1.metric("Pedidos en riesgo", df["pedido"].nunique())
-c2.metric("Pedidos con atraso", df[df["dias_demora"] > 0]["pedido"].nunique())
-
-# =====================================================
-# GRÁFICA
-# =====================================================
-top10 = (
+prov_plot = (
     df.groupby("proveedor", as_index=False)
-      .agg(promedio=("dias_demora", "mean"))
-      .sort_values("promedio", ascending=False)
-      .head(10)
+      .agg(promedio_atraso=("dias_demora", "mean"))
+      .sort_values("promedio_atraso", ascending=False)
 )
 
 fig = px.bar(
-    top10,
+    prov_plot.head(10),
     x="proveedor",
-    y="promedio",
-    title="Top 10 proveedores que ponen en riesgo los niveles de inventario",
-    color_discrete_sequence=["#69A341"]
+    y="promedio_atraso",
+    color="promedio_atraso",
+    color_continuous_scale=["#70AD47", "#FFC000", "#C00000"],
+    title="Top proveedores que ponen en riesgo los niveles de inventario"
 )
+
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# TABLA FINAL
+# TABLA RESUMEN POR PROVEEDOR (NUEVA)
+# =====================================================
+st.subheader("Proveedores que ponen en riesgo el inventario")
+
+tabla_prov = (
+    df.groupby("proveedor")
+      .agg(
+          pedidos_pendientes=("pedido", "nunique"),
+          atraso_promedio=("dias_demora", "mean"),
+          atraso_maximo=("dias_demora", "max")
+      )
+      .sort_values("atraso_promedio", ascending=False)
+)
+
+st.dataframe(tabla_prov, use_container_width=True)
+
+# =====================================================
+# TABLA DETALLE FINAL
 # =====================================================
 st.subheader("Detalle de pedidos en riesgo")
 
@@ -150,9 +169,15 @@ df = df.sort_values("dias_demora", ascending=False)
 st.dataframe(
     df[
         [
-            "pedido", "proveedor", "material", "descripcion",
-            "grupo", "centro", "fecha_entrega",
-            "cantidad_pedida", "cantidad_entregada_visible",
+            "pedido",
+            "proveedor",
+            "material",
+            "descripcion",
+            "grupo",
+            "centro",
+            "fecha_entrega",
+            "cantidad_pedida",
+            "cantidad_entregada_visible",
             "estatus"
         ]
     ],
