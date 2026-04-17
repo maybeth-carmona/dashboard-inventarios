@@ -67,26 +67,30 @@ df["cantidad_entregada"] = pd.to_numeric(df["cantidad_entregada"], errors="coerc
 df["cantidad_entregada_visible"] = df[["cantidad_entregada", "cantidad_pedida"]].min(axis=1)
 
 # ==============================
-# DIAS DE DEMORA
+# DIAS DE DEMORA (NO SE EXCLUYE NADA)
 # ==============================
 df["dias_demora"] = (HOY - df["fecha_entrega"]).dt.days
 df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
 df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
 
 # ==============================
-# ESTATUS (SIN EMOJIS)
+# ESTATUS CON EMOJIS (USANDO UNICODE ESCAPES)
 # ==============================
+EMOJI_ROJO = "\U0001F534"      # 🔴
+EMOJI_AMARILLO = "\U0001F7E1"  # 🟡
+EMOJI_VERDE = "\U0001F7E2"     # 🟢
+
 def estatus(d):
     if d > 60:
-        return "ROJO " + str(d)
+        return f"{EMOJI_ROJO} {d}"
     if d > 30:
-        return "AMARILLO " + str(d)
-    return "VERDE " + str(d)
+        return f"{EMOJI_AMARILLO} {d}"
+    return f"{EMOJI_VERDE} {d}"
 
 df["estatus"] = df["dias_demora"].apply(estatus)
 
 # ==============================
-# FILTROS TIPO EXCEL
+# FILTROS TIPO EXCEL (ELIMINAN FILAS)
 # ==============================
 st.sidebar.header("Filtros")
 
