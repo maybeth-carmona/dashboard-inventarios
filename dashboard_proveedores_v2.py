@@ -1,22 +1,27 @@
-import streamlit as stimport# CONFIGURACION GENERAL
-# ==============================
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+
+# ------------------------------
+# CONFIGURACION GENERAL
+# ------------------------------
 st.set_page_config(layout="wide")
 st.title("Detalle de posiciones en riesgo")
 
 HOY = pd.to_datetime(datetime.today().date())
 
-# ==============================
+# ------------------------------
 # CARGA DEL ARCHIVO RAW
-# ==============================
+# ------------------------------
 file = st.file_uploader("Estatus de pedidos de compra", type=["xlsx"])
 if file is None:
     st.stop()
 
 raw = pd.read_excel(file)
 
-# ==============================
-# RENOMBRE DE COLUMNAS BASE
-# ==============================
+# ------------------------------
+# RENOMBRE DE COLUMNAS
+# ------------------------------
 rename_map = {
     "Pedido de Compras": "pedido",
     "Material": "material",
@@ -29,9 +34,9 @@ rename_map = {
 
 df = raw.rename(columns=rename_map)
 
-# ==============================
+# ------------------------------
 # FECHA DE ENTREGA UNIFICADA
-# ==============================
+# ------------------------------
 if "Fecha de Entrega" in raw.columns:
     df["fecha_entrega"] = pd.to_datetime(raw["Fecha de Entrega"], errors="coerce")
 elif "Fecha Entrega" in raw.columns:
@@ -39,9 +44,9 @@ elif "Fecha Entrega" in raw.columns:
 else:
     df["fecha_entrega"] = pd.NaT
 
-# ==============================
+# ------------------------------
 # PROVEEDOR UNIFICADO
-# ==============================
+# ------------------------------
 if "Proveedor TEXT" in raw.columns and "Proveedor" in raw.columns:
     df["proveedor"] = raw["Proveedor TEXT"].fillna("").astype(str)
     df.loc[df["proveedor"].str.strip() == "", "proveedor"] = raw["Proveedor"].astype(str)
@@ -50,32 +55,32 @@ elif "Proveedor" in raw.columns:
 else:
     df["proveedor"] = "SIN_PROVEEDOR"
 
-# ==============================
+# ------------------------------
 # TIPOS NUMERICOS
-# ==============================
+# ------------------------------
 df["cantidad_pedida"] = pd.to_numeric(df["cantidad_pedida"], errors="coerce").fillna(0)
 df["cantidad_entregada"] = pd.to_numeric(df["cantidad_entregada"], errors="coerce").fillna(0)
 
-# ==============================
+# ------------------------------
 # CANTIDAD ENTREGADA VISIBLE
-# ==============================
+# ------------------------------
 df["cantidad_entregada_visible"] = df[
     ["cantidad_entregada", "cantidad_pedida"]
 ].min(axis=1)
 
-# ==============================
-# DIAS DE DEMORA (NO EXCLUIR FILAS)
-# ==============================
+# ------------------------------
+# DIAS DE DEMORA
+# ------------------------------
 df["dias_demora"] = (HOY - df["fecha_entrega"]).dt.days
 df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
 df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
 
-# ==============================
-# ESTATUS CON EMOJIS (UNICODE ESCAPE)
-# ==============================
-EMOJI_ROJO = "\U0001F534"      # 🔴
-EMOJI_AMARILLO = "\U0001F7E1"  # 🟡
-EMOJI_VERDE = "\U0001F7E2"     # 🟢
+# ------------------------------
+# ESTATUS CON EMOJIS (SEGURO)
+# ------------------------------
+EMOJI_ROJO = "\U0001F534"
+EMOJI_AMARILLO = "\U0001F7E1"
+EMOJI_VERDE = "\U0001F7E2"
 
 def estatus(d):
     if d > 60:
@@ -86,9 +91,9 @@ def estatus(d):
 
 df["estatus"] = df["dias_demora"].apply(estatus)
 
-# ==============================
-# FILTROS TIPO EXCEL (ELIMINAN FILAS)
-# ==============================
+# ------------------------------
+# FILTROS TIPO EXCEL
+# ------------------------------
 st.sidebar.header("Filtros")
 
 f_prov = st.sidebar.multiselect(
@@ -122,9 +127,9 @@ if solo_pendientes:
 
 df_view = df.loc[mask].copy()
 
-# ==============================
-# TABLA FINAL ESTILO EXCEL
-# ==============================
+# ------------------------------
+# TABLA FINAL (ESTILO EXCEL)
+# ------------------------------
 st.dataframe(
     df_view[
         [
@@ -142,7 +147,4 @@ st.dataframe(
     ].sort_values("dias_demora", ascending=False),
     use_container_width=True
 )
-import pandas as pd
-from datetime import datetime
-
-# ==============================
+``
