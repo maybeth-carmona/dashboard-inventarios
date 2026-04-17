@@ -60,7 +60,7 @@ ped["cantidad_pedida"] = pd.to_numeric(ped["cantidad_pedida"], errors="coerce").
 ped["cantidad_entregada"] = pd.to_numeric(ped["cantidad_entregada"], errors="coerce").fillna(0)
 ped["valor_pos"] = pd.to_numeric(ped["valor_pos"], errors="coerce").fillna(0)
 
-# Cantidad entregada visible
+# Cantidad entregada visible (nunca mayor al pedido)
 ped["cantidad_entregada_visible"] = ped[
     ["cantidad_entregada", "cantidad_pedida"]
 ].min(axis=1)
@@ -71,7 +71,7 @@ ped["cantidad_entregada_visible"] = ped[
 ped = ped[ped["cantidad_entregada_visible"] < ped["cantidad_pedida"]].copy()
 
 # ==============================
-# DEMORA
+# DEMORA Y SEMÁFORO
 # ==============================
 ped["dias_demora"] = (HOY - ped["fecha_entrega"]).dt.days
 ped.loc[ped["dias_demora"] < 0, "dias_demora"] = 0
@@ -111,26 +111,26 @@ kpi_pedidos = df["pedido"].nunique()
 kpi_atraso = df[df["dias_demora"] > 0]["pedido"].nunique()
 kpi_monto = df["valor_pos"].sum()
 
-k1, k2, k3 = st.columns(3)
-k1.metric("Pedidos en riesgo", kpi_pedidos)
-k2.metric("Pedidos con atraso", kpi_atraso)
-k3.metric("Monto en riesgo", f"${kpi_monto:,.0f}")
+c1, c2, c3 = st.columns(3)
+c1.metric("Pedidos en riesgo", kpi_pedidos)
+c2.metric("Pedidos con atraso", kpi_atraso)
+c3.metric("Monto en riesgo", f"${kpi_monto:,.0f}")
 
 # ==============================
 # GRÁFICA DE RIESGO (DEGRADADO)
 # ==============================
 prov_plot = (
     df.groupby("proveedor", as_index=False)
-      .agg(atraso_prom=("dias_demora", "mean"))
-      .sort_values("atraso_prom", ascending=False)
+      .agg(atraso_promedio=("dias_demora", "mean"))
+      .sort_values("atraso_promedio", ascending=False)
       .head(10)
 )
 
 fig = px.bar(
     prov_plot,
     x="proveedor",
-    y="atraso_prom",
-    color="atraso_prom",
+    y="atraso_promedio",
+    color="atraso_promedio",
     color_continuous_scale=["#70AD47", "#FFC000", "#C00000"],
     title="Top proveedores que ponen en riesgo los niveles de inventario"
 )
