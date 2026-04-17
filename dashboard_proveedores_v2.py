@@ -1,24 +1,14 @@
-st.set_page_config(layout="wide")
-st.title("Detalle de posiciones en riesgo")
+import streamlit as st
+import pandas as pd
+from datetime import datetime
 
-HOY = pd.to_datetime(datetime.today().date())
-
-file = st.file_uploader("Estatus de pedidos de compra", type=["xlsx"])
-if file is None:
-    st.stop()
-
-raw = pd.read_excel(file)
-
-df = raw.rename(columns={
-    "Pedido de Compras": "pedido",
-    "Material": "material",
-    "Texto Breve Posicion": "descripcion",
-    "Grupo artículos": "grupo",
-    "Centro": "centro",
-    "Cantidad de Mat en U": "cantidad_pedida",
+#cantidad_pedida",# =====================================================
     "Cantidad Entregada": "cantidad_entregada",
 })
 
+# =====================================================
+# FECHA DE ENTREGA (AMBOS NOMBRES SAP)
+# =====================================================
 if "Fecha de Entrega" in raw.columns:
     df["fecha_entrega"] = pd.to_datetime(raw["Fecha de Entrega"], errors="coerce")
 elif "Fecha Entrega" in raw.columns:
@@ -26,32 +16,56 @@ elif "Fecha Entrega" in raw.columns:
 else:
     df["fecha_entrega"] = pd.NaT
 
+# =====================================================
+# PROVEEDOR UNIFICADO
+# =====================================================
 if "Proveedor TEXT" in raw.columns and "Proveedor" in raw.columns:
-    df["proveedor"] = raw["Proveedor TEXT"].fillna("")
-    df.loc[df["proveedor"].str.strip() == "", "proveedor"] = raw["Proveedor"]
+    df["proveedor"] = raw["Proveedor TEXT"].fillna("").astype(str)
+    df.loc[df["proveedor"].str.strip() == "", "proveedor"] = raw["Proveedor"].astype(str)
 elif "Proveedor" in raw.columns:
-    df["proveedor"] = raw["Proveedor"]
+    df["proveedor"] = raw["Proveedor"].astype(str)
 else:
     df["proveedor"] = "SIN_PROVEEDOR"
 
+# =====================================================
+# TIPOS NUMÉRICOS
+# =====================================================
 df["cantidad_pedida"] = pd.to_numeric(df["cantidad_pedida"], errors="coerce").fillna(0)
 df["cantidad_entregada"] = pd.to_numeric(df["cantidad_entregada"], errors="coerce").fillna(0)
 
-df["cantidad_entregada_visible"] = df[["cantidad_entregada", "cantidad_pedida"]].min(axis=1)
+# =====================================================
+# CANTIDAD ENTREGADA VISIBLE
+# =====================================================
+df["cantidad_entregada_visible"] = df[
+    ["cantidad_entregada", "cantidad_pedida"]
+].min(axis=1)
 
+# =====================================================
+# DÍAS DE DEMORA
+# =====================================================
 df["dias_demora"] = (HOY - df["fecha_entrega"]).dt.days
 df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
 df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
 
+# =====================================================
+# ESTATUS CON EMOJIS (SEGUROS)
+# =====================================================
+EMOJI_ROJO = "\U0001F534"
+EMOJI_AMARILLO = "\U0001F7E1"
+EMOJI_VERDE = "\U0001F7E2"
+
 def estatus(d):
     if d > 60:
-        return "🔴 " + str(d)
+        return f"{EMOJI_ROJO} {d}"
     if d > 30:
-        return "🟡 " + str(d)
-    return "🟢 " + str(d)
+        return f"{EMOJI_AMARILLO} {d}"
+    return f"{EMOJI_VERDE} {d}"
 
 df["estatus"] = df["dias_demora"].apply(estatus)
 
+# =====================================================
+# FILTROS TIPO EXCEL
+# =====================================================
 st.sidebar.header("Filtros")
 
 f_prov = st.sidebar.multiselect(
@@ -83,8 +97,11 @@ if f_ped:
 if solo_pendientes:
     mask &= df["cantidad_entregada_visible"] < df["cantidad_pedida"]
 
-df_view = df.loc[mask]
+df_view = df.loc[mask].copy()
 
+# =====================================================
+# TABLA FINAL (ESTILO EXCEL)
+# =====================================================
 st.dataframe(
     df_view[
         [
@@ -102,3 +119,29 @@ st.dataframe(
     ].sort_values("dias_demora", ascending=False),
     use_container_width=True
 )
+``
+# CONFIGURACIÓN GENERAL
+# =====================================================
+st.set_page_config(layout="wide")
+st.title("Detalle de posiciones en riesgo")
+
+HOY = pd.to_datetime(datetime.today().date())
+
+# =====================================================
+# CARGA DEL EXCEL RAW
+# =====================================================
+file = st.file_uploader("Estatus de pedidos de compra", type=["xlsx"])
+if file is None:
+    st.stop()
+
+raw = pd.read_excel(file)
+
+# =====================================================
+# RENOMBRE DE COLUMNAS BASE
+# =====================================================
+df = raw.rename(columns={
+    "Pedido de Compras": "pedido",
+    "Material": "material",
+    "Texto Breve Posicion": "descripcion",
+    "Grupo artículos": "grupo",
+    "Centro": "centro",
