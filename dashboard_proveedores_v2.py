@@ -1,9 +1,4 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime
-
-# ==============================
-# CONFIGURACION GENERAL
+import streamlit as stimport# CONFIGURACION GENERAL
 # ==============================
 st.set_page_config(layout="wide")
 st.title("Detalle de posiciones en riesgo")
@@ -11,7 +6,7 @@ st.title("Detalle de posiciones en riesgo")
 HOY = pd.to_datetime(datetime.today().date())
 
 # ==============================
-# CARGA DE ARCHIVO RAW
+# CARGA DEL ARCHIVO RAW
 # ==============================
 file = st.file_uploader("Estatus de pedidos de compra", type=["xlsx"])
 if file is None:
@@ -20,7 +15,7 @@ if file is None:
 raw = pd.read_excel(file)
 
 # ==============================
-# RENOMBRE DE COLUMNAS
+# RENOMBRE DE COLUMNAS BASE
 # ==============================
 rename_map = {
     "Pedido de Compras": "pedido",
@@ -64,17 +59,19 @@ df["cantidad_entregada"] = pd.to_numeric(df["cantidad_entregada"], errors="coerc
 # ==============================
 # CANTIDAD ENTREGADA VISIBLE
 # ==============================
-df["cantidad_entregada_visible"] = df[["cantidad_entregada", "cantidad_pedida"]].min(axis=1)
+df["cantidad_entregada_visible"] = df[
+    ["cantidad_entregada", "cantidad_pedida"]
+].min(axis=1)
 
 # ==============================
-# DIAS DE DEMORA (NO SE EXCLUYE NADA)
+# DIAS DE DEMORA (NO EXCLUIR FILAS)
 # ==============================
 df["dias_demora"] = (HOY - df["fecha_entrega"]).dt.days
 df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
 df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
 
 # ==============================
-# ESTATUS CON EMOJIS (USANDO UNICODE ESCAPES)
+# ESTATUS CON EMOJIS (UNICODE ESCAPE)
 # ==============================
 EMOJI_ROJO = "\U0001F534"      # 🔴
 EMOJI_AMARILLO = "\U0001F7E1"  # 🟡
@@ -82,10 +79,10 @@ EMOJI_VERDE = "\U0001F7E2"     # 🟢
 
 def estatus(d):
     if d > 60:
-        return f"{EMOJI_ROJO} {d}"
+        return EMOJI_ROJO + " " + str(d)
     if d > 30:
-        return f"{EMOJI_AMARILLO} {d}"
-    return f"{EMOJI_VERDE} {d}"
+        return EMOJI_AMARILLO + " " + str(d)
+    return EMOJI_VERDE + " " + str(d)
 
 df["estatus"] = df["dias_demora"].apply(estatus)
 
@@ -126,7 +123,7 @@ if solo_pendientes:
 df_view = df.loc[mask].copy()
 
 # ==============================
-# TABLA FINAL (ESTILO EXCEL)
+# TABLA FINAL ESTILO EXCEL
 # ==============================
 st.dataframe(
     df_view[
@@ -145,4 +142,7 @@ st.dataframe(
     ].sort_values("dias_demora", ascending=False),
     use_container_width=True
 )
-``
+import pandas as pd
+from datetime import datetime
+
+# ==============================
