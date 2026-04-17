@@ -1,4 +1,5 @@
-import streamlit as stimport pandas as pd
+import streamlit as st
+import pandas as pd
 from datetime import datetime
 
 # ==============================
@@ -66,14 +67,14 @@ df["cantidad_entregada"] = pd.to_numeric(df["cantidad_entregada"], errors="coerc
 df["cantidad_entregada_visible"] = df[["cantidad_entregada", "cantidad_pedida"]].min(axis=1)
 
 # ==============================
-# DIAS DE DEMORA (NO SE EXCLUYE NADA)
+# DIAS DE DEMORA
 # ==============================
 df["dias_demora"] = (HOY - df["fecha_entrega"]).dt.days
 df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
 df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
 
 # ==============================
-# ESTATUS (TEXTO SIMPLE, SIN EMOJIS)
+# ESTATUS (SIN EMOJIS)
 # ==============================
 def estatus(d):
     if d > 60:
@@ -121,7 +122,7 @@ if solo_pendientes:
 df_view = df.loc[mask].copy()
 
 # ==============================
-# TABLA FINAL ESTILO EXCEL
+# TABLA FINAL (ESTILO EXCEL)
 # ==============================
 st.dataframe(
     df_view[
@@ -140,4 +141,4 @@ st.dataframe(
     ].sort_values("dias_demora", ascending=False),
     use_container_width=True
 )
-
+``
