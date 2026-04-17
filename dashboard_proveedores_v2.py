@@ -26,7 +26,8 @@ df = raw.rename(columns={
     "Pedido de Compras": "pedido",
     "Material": "material",
     "Texto Breve Posicion": "descripcion",
-    "Grupo artículos": "grupo",
+    "Grupo artículos": "grupo_articulo",
+    "Grupo de compras": "grupo_compra",
     "Centro": "centro",
     "Cantidad de Mat en U": "cantidad_pedida",
     "Cantidad Entregada": "cantidad_entregada"
@@ -74,18 +75,14 @@ df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
 df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
 
 # ======================================
-# ESTATUS CON EMOJIS (UNICODE SEGURO)
+# ESTATUS CON EMOJIS
 # ======================================
-EMOJI_ROJO = "\U0001F534"
-EMOJI_AMARILLO = "\U0001F7E1"
-EMOJI_VERDE = "\U0001F7E2"
-
 def estatus(d):
     if d > 60:
-        return EMOJI_ROJO + " " + str(d)
+        return "🔴 " + str(d)
     if d > 30:
-        return EMOJI_AMARILLO + " " + str(d)
-    return EMOJI_VERDE + " " + str(d)
+        return "🟡 " + str(d)
+    return "🟢 " + str(d)
 
 df["estatus"] = df["dias_demora"].apply(estatus)
 
@@ -98,6 +95,16 @@ f_prov = st.sidebar.multiselect(
     "Proveedor",
     sorted(df["proveedor"].unique()),
     default=sorted(df["proveedor"].unique())
+)
+
+f_grupo_compra = st.sidebar.multiselect(
+    "Grupo de compras",
+    sorted(df["grupo_compra"].dropna().astype(str).unique())
+)
+
+f_grupo_art = st.sidebar.multiselect(
+    "Grupo de artículos",
+    sorted(df["grupo_articulo"].dropna().astype(str).unique())
 )
 
 f_mat = st.sidebar.multiselect(
@@ -113,6 +120,12 @@ f_ped = st.sidebar.multiselect(
 solo_pendientes = st.sidebar.checkbox("Mostrar solo posiciones pendientes")
 
 mask = df["proveedor"].isin(f_prov)
+
+if f_grupo_compra:
+    mask &= df["grupo_compra"].astype(str).isin(f_grupo_compra)
+
+if f_grupo_art:
+    mask &= df["grupo_articulo"].astype(str).isin(f_grupo_art)
 
 if f_mat:
     mask &= df["material"].astype(str).isin(f_mat)
@@ -133,9 +146,10 @@ st.dataframe(
         [
             "pedido",
             "proveedor",
+            "grupo_compra",
+            "grupo_articulo",
             "material",
             "descripcion",
-            "grupo",
             "centro",
             "cantidad_pedida",
             "cantidad_entregada_visible",
@@ -145,3 +159,4 @@ st.dataframe(
     ].sort_values("dias_demora", ascending=False),
     use_container_width=True
 )
+``
