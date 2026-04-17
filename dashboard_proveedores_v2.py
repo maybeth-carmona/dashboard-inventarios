@@ -1,22 +1,14 @@
-from datetime import datetime
-
 st.set_page_config(layout="wide")
-st.title("Seguimiento a Proveedores – Pedidos en demora")
+st.title("Detalle de posiciones en riesgo")
 
 HOY = pd.to_datetime(datetime.today().date())
 
-# ==========================
-# CARGA DEL EXCEL RAW
-# ==========================
-archivo = st.file_uploader("Carga el Excel RAW de proveedores", type=["xlsx"])
-if archivo is None:
+file = st.file_uploader("Estatus de pedidos de compra", type=["xlsx"])
+if file is None:
     st.stop()
 
-raw = pd.read_excel(archivo)
+raw = pd.read_excel(file)
 
-# ==========================
-# COLUMNAS BASE
-# ==========================
 df = raw.rename(columns={
     "Pedido de Compras": "pedido",
     "Material": "material",
@@ -24,12 +16,9 @@ df = raw.rename(columns={
     "Grupo artículos": "grupo",
     "Centro": "centro",
     "Cantidad de Mat en U": "cantidad_pedida",
-    "Cantidad Entregada": "cantidad_entregada"
+    "Cantidad Entregada": "cantidad_entregada",
 })
 
-# ==========================
-# FECHA DE ENTREGA (AMBAS OPCIONES SAP)
-# ==========================
 if "Fecha de Entrega" in raw.columns:
     df["fecha_entrega"] = pd.to_datetime(raw["Fecha de Entrega"], errors="coerce")
 elif "Fecha Entrega" in raw.columns:
@@ -37,38 +26,23 @@ elif "Fecha Entrega" in raw.columns:
 else:
     df["fecha_entrega"] = pd.NaT
 
-# ==========================
-# PROVEEDOR
-# ==========================
 if "Proveedor TEXT" in raw.columns and "Proveedor" in raw.columns:
     df["proveedor"] = raw["Proveedor TEXT"].fillna("")
-    df.loc[df["proveedor"] == "", "proveedor"] = raw["Proveedor"]
+    df.loc[df["proveedor"].str.strip() == "", "proveedor"] = raw["Proveedor"]
 elif "Proveedor" in raw.columns:
     df["proveedor"] = raw["Proveedor"]
 else:
     df["proveedor"] = "SIN_PROVEEDOR"
 
-# ==========================
-# NUMÉRICOS
-# ==========================
 df["cantidad_pedida"] = pd.to_numeric(df["cantidad_pedida"], errors="coerce").fillna(0)
 df["cantidad_entregada"] = pd.to_numeric(df["cantidad_entregada"], errors="coerce").fillna(0)
 
-# ==========================
-# ENTREGADO VISIBLE
-# ==========================
-df["cantidad_entregada_visible"] = df[["cantidad_entregada","cantidad_pedida"]].min(axis=1)
+df["cantidad_entregada_visible"] = df[["cantidad_entregada", "cantidad_pedida"]].min(axis=1)
 
-# ==========================
-# DÍAS DE DEMORA
-# ==========================
 df["dias_demora"] = (HOY - df["fecha_entrega"]).dt.days
 df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
 df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
 
-# ==========================
-# ESTATUS CON EMOJIS
-# ==========================
 def estatus(d):
     if d > 60:
         return "🔴 " + str(d)
@@ -78,15 +52,12 @@ def estatus(d):
 
 df["estatus"] = df["dias_demora"].apply(estatus)
 
-# ==========================
-# FILTROS TIPO EXCEL
-# ==========================
 st.sidebar.header("Filtros")
 
 f_prov = st.sidebar.multiselect(
     "Proveedor",
-    sorted(df["proveedor"].dropna().unique()),
-    default=sorted(df["proveedor"].dropna().unique())
+    sorted(df["proveedor"].unique()),
+    default=sorted(df["proveedor"].unique())
 )
 
 f_mat = st.sidebar.multiselect(
@@ -112,13 +83,10 @@ if f_ped:
 if solo_pendientes:
     mask &= df["cantidad_entregada_visible"] < df["cantidad_pedida"]
 
-vista = df.loc[mask].copy()
+df_view = df.loc[mask]
 
-# ==========================
-# TABLA FINAL (EXCEL)
-# ==========================
 st.dataframe(
-    vista[
+    df_view[
         [
             "pedido",
             "proveedor",
@@ -129,7 +97,7 @@ st.dataframe(
             "cantidad_pedida",
             "cantidad_entregada_visible",
             "dias_demora",
-            "estatus"
+            "estatus",
         ]
     ].sort_values("dias_demora", ascending=False),
     use_container_width=True
