@@ -3,21 +3,25 @@ import pandas as pd
 from datetime import datetime
 
 # =====================================================
-# CONFIG GENERAL
+# CONFIGURACIÓN GENERAL
 # =====================================================
 st.set_page_config(layout="wide")
 st.title("Detalle de posiciones en riesgo")
 
 HOY = pd.to_datetime(datetime.today().date())
 
+# =====================================================
+# CARGA DE ARCHIVO
+# =====================================================
 file = st.file_uploader("Estatus de pedidos de compra", type=["xlsx"])
 if file is None:
     st.stop()
 
-df_raw = pd.read_excel(file)
+raw = pd.read_excel(file)
 
 # =====================================================
-# RENOMBRE DE COLUMNAS
+# RENOMBRE DE COLUMNAS BASE
+# (NO SE OMITE NINGÚN MATERIAL / PEDIDO)
 # =====================================================
 rename_map = {
     "Pedido de Compras": "pedido",
@@ -29,26 +33,26 @@ rename_map = {
     "Cantidad Entregada": "cantidad_entregada",
 }
 
-df = df_raw.rename(columns=rename_map)
+df = raw.rename(columns=rename_map)
 
 # =====================================================
-# FECHA DE ENTREGA — UNIFICADA (CLAVE 🔴)
+# FECHA DE ENTREGA UNIFICADA (CLAVE)
 # =====================================================
-if "Fecha de Entrega" in df_raw.columns:
-    df["fecha_entrega"] = pd.to_datetime(df_raw["Fecha de Entrega"], errors="coerce")
-elif "Fecha Entrega" in df_raw.columns:
-    df["fecha_entrega"] = pd.to_datetime(df_raw["Fecha Entrega"], errors="coerce")
+if "Fecha de Entrega" in raw.columns:
+    df["fecha_entrega"] = pd.to_datetime(raw["Fecha de Entrega"], errors="coerce")
+elif "Fecha Entrega" in raw.columns:
+    df["fecha_entrega"] = pd.to_datetime(raw["Fecha Entrega"], errors="coerce")
 else:
     df["fecha_entrega"] = pd.NaT
 
 # =====================================================
-# PROVEEDOR UNIFICADO
+# PROVEEDOR UNIFICADO (NO EXCLUIR)
 # =====================================================
-if "Proveedor TEXT" in df_raw.columns and "Proveedor" in df_raw.columns:
-    df["proveedor"] = df_raw["Proveedor TEXT"].fillna("").astype(str)
-    df.loc[df["proveedor"].str.strip() == "", "proveedor"] = df_raw["Proveedor"].astype(str)
-elif "Proveedor" in df_raw.columns:
-    df["proveedor"] = df_raw["Proveedor"].astype(str)
+if "Proveedor TEXT" in raw.columns and "Proveedor" in raw.columns:
+    df["proveedor"] = raw["Proveedor TEXT"].fillna("").astype(str)
+    df.loc[df["proveedor"].str.strip() == "", "proveedor"] = raw["Proveedor"].astype(str)
+elif "Proveedor" in raw.columns:
+    df["proveedor"] = raw["Proveedor"].astype(str)
 else:
     df["proveedor"] = "SIN_PROVEEDOR"
 
@@ -66,7 +70,7 @@ df["cantidad_entregada_visible"] = df[
 ].min(axis=1)
 
 # =====================================================
-# DÍAS DE DEMORA (SIN EXCLUIR FILAS)
+# DÍAS DE DEMORA (NO EXCLUIR FILAS)
 # =====================================================
 df["dias_demora"] = (HOY - df["fecha_entrega"]).dt.days
 df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
@@ -75,14 +79,14 @@ df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
 # =====================================================
 # ESTATUS VISUAL (SEMÁFORO + NÚMERO)
 # =====================================================
-def estatus(d):
+def estatus_excel(d):
     if d > 60:
-        return f"🔴 {d}"
+        return "🔴 " + str(d)
     if d > 30:
-        return f"🟡 {d}"
-    return f"🟢 {d}"
+        return "🟡 " + str(d)
+    return "🟢 " + str(d)
 
-df["estatus"] = df["dias_demora"].apply(estatus)
+df["estatus"] = df["dias_demora"].apply(estatus_excel)
 
 # =====================================================
 # FILTROS TIPO EXCEL (ELIMINAN FILAS)
@@ -121,7 +125,8 @@ if solo_pendientes:
 df_view = df.loc[mask].copy()
 
 # =====================================================
-# TABLA FINAL (COMO EXCEL)
+# TABLA FINAL (ESTILO EXCEL)
+# (SIN COLUMNA VALOR DE POSICIÓN)
 # =====================================================
 st.dataframe(
     df_view[
