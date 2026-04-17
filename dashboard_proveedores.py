@@ -4,7 +4,7 @@ import plotly.express as px
 from datetime import datetime
 
 # =====================================================
-# CONFIG GENERAL
+# CONFIGURACIÓN GENERAL
 # =====================================================
 st.set_page_config(
     page_title="Riesgo en Compras | Seguimiento a Proveedores",
@@ -16,18 +16,19 @@ st.title("Riesgo en Compras | Seguimiento a Proveedores")
 HOY = pd.to_datetime(datetime.today().date())
 
 # =====================================================
-# CARGA ARCHIVO
+# CARGA DE ARCHIVO
 # =====================================================
-st.sidebar.header("📂 Archivo SAP")
+st.sidebar.header("Archivo SAP")
 
 file_ped = st.sidebar.file_uploader("Pedidos de Compras", type=["xlsx"])
+
 if file_ped is None:
     st.stop()
 
 ped = pd.read_excel(file_ped)
 
 # =====================================================
-# RENOMBRE COLUMNAS (SAP REAL)
+# RENOMBRE DE COLUMNAS (SAP REAL)
 # =====================================================
 ped = ped.rename(columns={
     "Pedido de Compras": "pedido",
@@ -39,7 +40,7 @@ ped = ped.rename(columns={
     "Fecha de Entrega": "fecha_entrega",
     "Cantidad de Mat en U": "cantidad_pedida",
     "Cantidad Entregada": "cantidad_entregada",
-    "Valor Neto de la Pos": "valor_pos"   # ✅ AF1
+    "Valor Neto de la Pos": "valor_pos"
 })
 
 # =====================================================
@@ -60,18 +61,18 @@ ped["cantidad_pedida"] = pd.to_numeric(ped["cantidad_pedida"], errors="coerce").
 ped["cantidad_entregada"] = pd.to_numeric(ped["cantidad_entregada"], errors="coerce").fillna(0)
 ped["valor_pos"] = pd.to_numeric(ped["valor_pos"], errors="coerce").fillna(0)
 
-# Cantidad entregada visible (no mayor al pedido)
+# Cantidad entregada visible (nunca mayor que pedida)
 ped["cantidad_entregada_visible"] = ped[
     ["cantidad_entregada", "cantidad_pedida"]
 ].min(axis=1)
 
 # =====================================================
-# SOLO POSICIONES PENDIENTES (OPTIMIZA Y ES REAL)
+# SOLO POSICIONES PENDIENTES
 # =====================================================
 ped = ped[ped["cantidad_entregada_visible"] < ped["cantidad_pedida"]].copy()
 
 # =====================================================
-# DEMORA
+# CÁLCULO DE DEMORA
 # =====================================================
 ped["dias_demora"] = (HOY - ped["fecha_entrega"]).dt.days
 ped.loc[ped["dias_demora"] < 0, "dias_demora"] = 0
@@ -88,25 +89,15 @@ ped["estatus"] = ped["dias_demora"].apply(semaforo)
 # =====================================================
 # FILTROS TIPO EXCEL
 # =====================================================
-st.sidebar.subheader("🔍 Filtros")
+st.sidebar.subheader("Filtros")
 
-f_prov = st.sidebar.multiselect(
-    "Proveedor",
-    sorted(ped["proveedor"].unique()),
-    default=sorted(ped["proveedor"].unique())
-)
+prov_opts = sorted(ped["proveedor"].dropna().unique().tolist())
+grp_opts = sorted(ped["grupo"].dropna().unique().tolist())
+cen_opts = sorted(ped["centro"].dropna().unique().tolist())
 
-f_grp = st.sidebar.multiselect(
-    "Grupo artículos",
-    sorted(ped["grupo"].unique()),
-    default=sorted(ped["grupo"].unique())
-)
-
-f_cen = st.sidebar.multiselect(
-    "Centro",
-    sorted(ped["centro"].unique()),
-    default=sorted(ped["centro"].unique())
-)
+f_prov = st.sidebar.multiselect("Proveedor", prov_opts, default=prov_opts)
+f_grp = st.sidebar.multiselect("Grupo artículos", grp_opts, default=grp_opts)
+f_cen = st.sidebar.multiselect("Centro", cen_opts, default=cen_opts)
 
 df = ped[
     ped["proveedor"].isin(f_prov) &
@@ -115,15 +106,15 @@ df = ped[
 ].copy()
 
 # =====================================================
-# KPIs EJECUTIVOS (VISUALES)
+# KPIs EJECUTIVOS
 # =====================================================
 kpi_pedidos = df["pedido"].nunique()
 kpi_atraso = df[df["dias_demora"] > 0]["pedido"].nunique()
 kpi_monto = df["valor_pos"].sum()
 
 k1, k2, k3 = st.columns(3)
-k1.metric("Pedidos en riesgo", f"{kpi_pedidos}")
-k2.metric("Pedidos con atraso", f"{kpi_atraso}")
+k1.metric("Pedidos en riesgo", kpi_pedidos)
+k2.metric("Pedidos con atraso", kpi_atraso)
 k3.metric("Monto en riesgo", f"${kpi_monto:,.0f}")
 
 # =====================================================
