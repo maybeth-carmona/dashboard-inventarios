@@ -26,12 +26,10 @@ if file_ped is None:
 df_raw = pd.read_excel(file_ped)
 
 # =====================================================
-# NORMALIZACIÓN DE COLUMNAS SAP
+# RENOMBRE DE COLUMNAS (SIN PROVEEDOR)
 # =====================================================
 df = df_raw.rename(columns={
     "Pedido de Compras": "pedido",
-    "Proveedor": "proveedor",
-    "Proveedor TEXT": "proveedor",
     "Material": "material",
     "Texto Breve Posicion": "descripcion",
     "Grupo artículos": "grupo",
@@ -41,6 +39,19 @@ df = df_raw.rename(columns={
     "Cantidad Entregada": "cantidad_entregada",
     "Valor Neto de la Pos": "valor_pos"
 })
+
+# =====================================================
+# UNIFICAR PROVEEDOR (SAP REAL)
+# =====================================================
+if "Proveedor TEXT" in df_raw.columns and "Proveedor" in df_raw.columns:
+    df["proveedor"] = df_raw["Proveedor TEXT"].astype(str)
+    df.loc[df["proveedor"].str.strip() == "", "proveedor"] = df_raw["Proveedor"].astype(str)
+elif "Proveedor TEXT" in df_raw.columns:
+    df["proveedor"] = df_raw["Proveedor TEXT"].astype(str)
+elif "Proveedor" in df_raw.columns:
+    df["proveedor"] = df_raw["Proveedor"].astype(str)
+else:
+    df["proveedor"] = "SIN_PROVEEDOR"
 
 # =====================================================
 # LIMPIEZA BASE
@@ -66,7 +77,7 @@ df["cantidad_entregada_visible"] = df[
 ].min(axis=1)
 
 # =====================================================
-# SOLO POSICIONES PENDIENTES (OPTIMIZA Y ES REALIDAD)
+# SOLO POSICIONES PENDIENTES
 # =====================================================
 df = df[df["cantidad_entregada_visible"] < df["cantidad_pedida"]].copy()
 
@@ -90,9 +101,9 @@ df["estatus"] = df["dias_demora"].apply(semaforo)
 # =====================================================
 st.sidebar.subheader("Filtros")
 
-prov_opts = sorted(df["proveedor"].unique())
-grp_opts = sorted(df["grupo"].unique())
-cen_opts = sorted(df["centro"].unique())
+prov_opts = sorted(df["proveedor"].dropna().unique().tolist())
+grp_opts = sorted(df["grupo"].dropna().unique().tolist())
+cen_opts = sorted(df["centro"].dropna().unique().tolist())
 
 f_prov = st.sidebar.multiselect("Proveedor", prov_opts, default=prov_opts)
 f_grp = st.sidebar.multiselect("Grupo artículos", grp_opts, default=grp_opts)
@@ -105,7 +116,7 @@ df = df[
 ].copy()
 
 # =====================================================
-# KPIs VISUALES
+# KPIs VISUALES (COLOREADOS)
 # =====================================================
 kpi_pedidos = df["pedido"].nunique()
 kpi_atraso = df[df["dias_demora"] > 0]["pedido"].nunique()
@@ -134,20 +145,20 @@ k3.markdown(
 st.markdown("---")
 
 # =====================================================
-# GRÁFICA DE RIESGO
+# GRÁFICA DE RIESGO (DEGRADADO)
 # =====================================================
 graf = (
     df.groupby("proveedor", as_index=False)
-      .agg(atraso_prom=("dias_demora", "mean"))
-      .sort_values("atraso_prom", ascending=False)
+      .agg(atraso_promedio=("dias_demora", "mean"))
+      .sort_values("atraso_promedio", ascending=False)
       .head(10)
 )
 
 fig = px.bar(
     graf,
     x="proveedor",
-    y="atraso_prom",
-    color="atraso_prom",
+    y="atraso_promedio",
+    color="atraso_promedio",
     color_continuous_scale=["#70AD47", "#FFC000", "#C00000"],
     title="Top proveedores que ponen en riesgo los niveles de inventario"
 )
@@ -183,7 +194,7 @@ st.dataframe(
 )
 
 # =====================================================
-# TABLA DETALLE
+# TABLA DETALLE FINAL
 # =====================================================
 st.subheader("Detalle de posiciones en riesgo")
 
