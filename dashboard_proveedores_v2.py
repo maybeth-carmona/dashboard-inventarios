@@ -4,7 +4,7 @@ import plotly.express as px
 from datetime import datetime
 
 # =====================================================
-# CONFIGURACIÓN GENERAL
+# CONFIG GENERAL
 # =====================================================
 st.set_page_config(
     page_title="Seguimiento a Proveedores | Compras",
@@ -19,12 +19,7 @@ HOY = pd.to_datetime(datetime.today().date())
 # CARGA ARCHIVO
 # =====================================================
 st.sidebar.header("📂 Archivo SAP")
-
-file_ped = st.sidebar.file_uploader(
-    "Estatus de pedidos de compra",
-    type=["xlsx"]
-)
-
+file_ped = st.sidebar.file_uploader("Estatus de pedidos de compra", type=["xlsx"])
 if file_ped is None:
     st.stop()
 
@@ -46,7 +41,7 @@ df = df_raw.rename(columns={
 })
 
 # =====================================================
-# UNIFICAR PROVEEDOR (SAP TRAE DOS CAMPOS)
+# UNIFICAR PROVEEDOR (SAP REAL)
 # =====================================================
 if "Proveedor TEXT" in df_raw.columns and "Proveedor" in df_raw.columns:
     df["proveedor"] = df_raw["Proveedor TEXT"].fillna("").astype(str)
@@ -61,11 +56,8 @@ else:
 # =====================================================
 # LIMPIEZA BÁSICA (SIN ELIMINAR FILAS)
 # =====================================================
-df["pedido"] = df["pedido"].astype(str)
-df["material"] = df["material"].astype(str)
-df["proveedor"] = df["proveedor"].astype(str)
-df["grupo"] = df["grupo"].astype(str)
-df["centro"] = df["centro"].astype(str)
+for col in ["pedido", "material", "proveedor", "grupo", "centro"]:
+    df[col] = df[col].astype(str)
 
 df["fecha_entrega"] = pd.to_datetime(df["fecha_entrega"], errors="coerce")
 
@@ -78,24 +70,25 @@ df["cantidad_entregada_visible"] = df[
 ].min(axis=1)
 
 # =====================================================
-# CÁLCULO DE DEMORA Y ESTATUS
+# CÁLCULO DE DEMORA (ROBUSTO)
 # =====================================================
 df["dias_demora"] = (HOY - df["fecha_entrega"]).dt.days
-df.loc[df["dias_demora"] < 0, "dias_demora"] = 0
+df["dias_demora"] = df["dias_demora"].fillna(0).astype(int)
 
 def estatus(row):
     if row["cantidad_entregada_visible"] < row["cantidad_pedida"]:
-        if row["dias_demora"] > 60:
-            return f"🔴 {int(row['dias_demora'])}"
-        if row["dias_demora"] > 30:
-            return f"🟡 {int(row['dias_demora'])}"
-        return f"🟢 {int(row['dias_demora'])}"
+        d = row["dias_demora"]
+        if d > 60:
+            return f"🔴 {d}"
+        if d > 30:
+            return f"🟡 {d}"
+        return f"🟢 {d}"
     return "✅ Entregado"
 
 df["estatus"] = df.apply(estatus, axis=1)
 
 # =====================================================
-# CONTROLES TIPO EXCEL
+# FILTROS TIPO EXCEL
 # =====================================================
 st.sidebar.subheader("🔍 Filtros")
 
@@ -116,7 +109,7 @@ f_mat = st.sidebar.multiselect(
 )
 
 f_grp = st.sidebar.multiselect(
-    "Grupo de artículos",
+    "Grupo artículos",
     sorted(df["grupo"].unique())
 )
 
@@ -125,7 +118,6 @@ f_cen = st.sidebar.multiselect(
     sorted(df["centro"].unique())
 )
 
-# Checkbox estilo Excel
 solo_pendientes = st.checkbox("Mostrar SOLO posiciones pendientes")
 
 df_f = df.copy()
@@ -140,7 +132,6 @@ if f_grp:
     df_f = df_f[df_f["grupo"].isin(f_grp)]
 if f_cen:
     df_f = df_f[df_f["centro"].isin(f_cen)]
-
 if solo_pendientes:
     df_f = df_f[df_f["cantidad_entregada_visible"] < df_f["cantidad_pedida"]]
 
@@ -149,14 +140,17 @@ if solo_pendientes:
 # =====================================================
 c1, c2, c3 = st.columns(3)
 
-c1.metric("Pedidos totales", df_f["pedido"].nunique())
-c2.metric("Posiciones pendientes", (df_f["cantidad_entregada_visible"] < df_f["cantidad_pedida"]).sum())
+c1.metric("Pedidos visibles", df_f["pedido"].nunique())
+c2.metric(
+    "Posiciones pendientes",
+    (df_f["cantidad_entregada_visible"] < df_f["cantidad_pedida"]).sum()
+)
 c3.metric("Monto total", f"${df_f['valor_pos'].sum():,.0f}")
 
 st.markdown("---")
 
 # =====================================================
-# GRÁFICA DE PROVEEDORES (SIEMPRE CON TODO)
+# GRÁFICA DE PROVEEDORES
 # =====================================================
 graf = (
     df_f.groupby("proveedor", as_index=False)
@@ -177,7 +171,7 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# TABLA DETALLE (TODO, COMO EN EXCEL)
+# TABLA DETALLE (COMPLETA, COMO EXCEL)
 # =====================================================
 st.subheader("Detalle de pedidos y posiciones")
 
@@ -185,3 +179,4 @@ st.dataframe(
     df_f.sort_values("dias_demora", ascending=False),
     use_container_width=True
 )
+``
