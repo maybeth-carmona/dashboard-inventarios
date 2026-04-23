@@ -3,26 +3,26 @@ import pandas as pd
 from datetime import datetime
 import plotly.express as px
 
-# ======================================
+# ===============================
 # CONFIGURACIÓN GENERAL
-# ======================================
+# ===============================
 st.set_page_config(layout="wide")
 st.markdown("## Riesgo en Compras | Seguimiento a Proveedores")
 
 HOY = pd.to_datetime(datetime.today().date())
 
-# ======================================
+# ===============================
 # CARGA DEL RAW
-# ======================================
+# ===============================
 file = st.file_uploader("Estatus de pedidos de compra (RAW SAP)", type=["xlsx"])
 if file is None:
     st.stop()
 
 raw = pd.read_excel(file)
 
-# ======================================
-# RENOMBRE DE COLUMNAS BASE
-# ======================================
+# ===============================
+# MAPEO BASE DE COLUMNAS
+# ===============================
 df = raw.rename(columns={
     "Pedido de Compras": "pedido",
     "Material": "material_sap",
@@ -36,41 +36,9 @@ df = raw.rename(columns={
     "Moneda": "moneda"
 })
 
-# ======================================
-# FECHA DE CREACIÓN (ROBUSTO ✅)
-# ======================================
-fecha_creacion_col = None
-for col in raw.columns:
-    if "fecha" in col.lower() and (
-        "crea" in col.lower()
-        or "doc" in col.lower()
-        or "pedido" in col.lower()
-    ):
-        fecha_creacion_col = col
-        break
-
-if fecha_creacion_col:
-    df["fecha_creacion"] = pd.to_datetime(raw[fecha_creacion_col], errors="coerce")
-else:
-    df["fecha_creacion"] = pd.NaT
-
-# ======================================
-# FECHA DE ENTREGA
-# ======================================
-fecha_entrega_col = None
-for col in raw.columns:
-    if "fecha" in col.lower() and "entreg" in col.lower():
-        fecha_entrega_col = col
-        break
-
-if fecha_entrega_col:
-    df["fecha_entrega"] = pd.to_datetime(raw[fecha_entrega_col], errors="coerce").dt.date
-else:
-    df["fecha_entrega"] = pd.NaT
-
-# ======================================
+# ===============================
 # PROVEEDOR
-# ======================================
+# ===============================
 if "Proveedor TEXT" in raw.columns and "Proveedor" in raw.columns:
     df["proveedor"] = raw["Proveedor TEXT"].fillna("").astype(str)
     df.loc[df["proveedor"].str.strip() == "", "proveedor"] = raw["Proveedor"].astype(str)
@@ -79,16 +47,38 @@ elif "Proveedor" in raw.columns:
 else:
     df["proveedor"] = "SIN_PROVEEDOR"
 
-# ======================================
+# ===============================
+# DETECCIÓN DE FECHAS (ROBUSTO)
+# ===============================
+def detectar_fecha(cols, palabras):
+    for c in cols:
+        c_low = c.lower()
+        if all(p in c_low for p in palabras):
+            return c
+    return None
+
+col_creacion = detectar_fecha(raw.columns, ["fecha", "crea"])
+if col_creacion:
+    df["fecha_creacion"] = pd.to_datetime(raw[col_creacion], errors="coerce")
+else:
+    df["fecha_creacion"] = pd.NaT
+
+col_entrega = detectar_fecha(raw.columns, ["fecha", "entreg"])
+if col_entrega:
+    df["fecha_entrega"] = pd.to_datetime(raw[col_entrega], errors="coerce").dt.date
+else:
+    df["fecha_entrega"] = pd.NaT
+
+# ===============================
 # NUMÉRICOS
-# ======================================
+# ===============================
 df["cantidad_pedida"] = pd.to_numeric(df["cantidad_pedida"], errors="coerce").fillna(0)
 df["cantidad_entregada"] = pd.to_numeric(df["cantidad_entregada"], errors="coerce").fillna(0)
 df["valor_pos"] = pd.to_numeric(df["valor_pos"], errors="coerce").fillna(0)
 
-# ======================================
+# ===============================
 # CÁLCULOS CLAVE
-# ======================================
+# ===============================
 df["cantidad_pendiente"] = (df["cantidad_pedida"] - df["cantidad_entregada"]).clip(lower=0)
 
 df["dias_demora"] = (HOY - pd.to_datetime(df["fecha_entrega"])).dt.days
@@ -104,9 +94,9 @@ def semaforo(d):
 
 df["semaforo"] = df["dias_demora"].apply(semaforo)
 
-# ======================================
+# ===============================
 # FILTROS
-# ======================================
+# ===============================
 st.sidebar.header("Filtros")
 
 f_prov = st.sidebar.multiselect("Proveedor", sorted(df["proveedor"].unique()))
@@ -120,20 +110,20 @@ if f_gc: mask &= df["grupo_compra"].astype(str).isin(f_gc)
 if f_ga: mask &= df["grupo_articulo"].astype(str).isin(f_ga)
 if f_cen: mask &= df["centro"].astype(str).isin(f_cen)
 
-df_view = df[mask].copy()
+df_view = df.loc[mask].copy()
 
-# ======================================
-# KPIs
-# ======================================
+# ===============================
+# KPIs (CUADROS)
+# ===============================
 k1, k2 = st.columns(2)
 k1.metric("Pedidos en riesgo", df_view[df_view["dias_demora"] > 30]["pedido"].nunique())
 k2.metric("Pedidos con atraso", df_view[df_view["dias_demora"] > 0]["pedido"].nunique())
 
 st.markdown("---")
 
-# ======================================
+# ===============================
 # GRÁFICA PROVEEDORES
-# ======================================
+# ===============================
 prov_plot = (
     df_view.groupby("proveedor", as_index=False)
     .agg(dias_max=("dias_demora", "max"))
@@ -152,45 +142,48 @@ fig = px.bar(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# ======================================
+# ===============================
 # RESUMEN POR PROVEEDOR
-# ======================================
+# ===============================
 st.subheader("Resumen por proveedor")
 
 resumen = (
     df_view[df_view["cantidad_pendiente"] > 0]
-    .groupby(["proveedor", "moneda"])
+    .groupby(["proveedor", "moneda"], as_index=False)
     .agg(
         pedidos_pendientes=("pedido", "nunique"),
         monto_total=("valor_pos", "sum"),
         dias_maximos=("dias_demora", "max")
     )
-    .reset_index()
     .sort_values("dias_maximos", ascending=False)
 )
 
 resumen["semaforo"] = resumen["dias_maximos"].apply(semaforo)
 st.dataframe(resumen, use_container_width=True)
 
-# ======================================
-# DETALLE FINAL
-# ======================================
+# ===============================
+# DETALLE DE PEDIDOS PENDIENTES
+# ===============================
 st.subheader("Detalle de pedidos pendientes")
 
-detalle = df_view[df_view["cantidad_pendiente"] > 0][
+detalle = (
+    df_view[df_view["cantidad_pendiente"] > 0]
+    .sort_values("dias_demora", ascending=False)
     [
-        "pedido",
-        "proveedor",
-        "material_sap",
-        "material_desc",
-        "grupo_articulo",
-        "cantidad_entregada",
-        "cantidad_pendiente",
-        "semaforo",
-        "fecha_creacion",
-        "fecha_entrega",
-        "centro"
+        [
+            "pedido",
+            "proveedor",
+            "material_sap",
+            "material_desc",
+            "grupo_articulo",
+            "cantidad_entregada",
+            "cantidad_pendiente",
+            "semaforo",
+            "fecha_creacion",
+            "fecha_entrega",
+            "centro"
+        ]
     ]
-].sort_values("dias_demora", ascending=False)
+)
 
 st.dataframe(detalle, use_container_width=True)
